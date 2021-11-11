@@ -1,6 +1,10 @@
 ☐ json
     ☐ README
     ☐ add unicode support
+☐ parser
+    ☐ add tests
+☐ unittest
+    ☐ README
 
 ☐ Future Libraries
     ☐ tokenizer and parser
