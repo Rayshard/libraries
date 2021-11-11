@@ -1,0 +1,43 @@
+{
+    "terminals": {
+        "default": {
+            "(_|[a-zA-z])(_|[a-zA-z]|[0-9])*": {
+                "name": "ID",
+                "return": "Token(TokenType::ID, @value, Position(@line, @column)",
+                "action": "print(f\"({}, {}) {}\", @value, @line, @column)"
+            },
+            "-?(0|[1-9][0-9]*)": {
+                "name": "Number",
+                "return": "Token(TokenType::NUMBER, @value, @position)",
+                "action": "print(f\"({}, {}) {}\", @value, @line, @column)"
+            },
+            "\"": {
+                "name": ""
+            }
+        },
+        "string_literal": {}
+    },
+    "nonterminals": {
+        "VARDECL": {
+            "rules": [
+                {
+                    "pattern": [
+                        {
+                            "terminal": "ID",
+                            "name": "id"
+                        },
+                        {
+                            "regex": "="
+                        },
+                        {
+                            "nonterminal": "EXPR",
+                            "name": "expr"
+                        }
+                    ],
+                    "return": "VarDecl()"
+                }
+            ],
+            "action": "print(\"Found variable declaration!\")"
+        }
+    }
+}
