@@ -26,6 +26,16 @@ namespace parser
         return _lhs << _rhs.ToString();
     }
 
+    class Regex : public std::regex
+    {
+        std::string string;
+    public:
+        Regex() : std::regex(), string() { }
+        Regex(const std::string& _string) : std::regex(_string), string(_string) { }
+
+        const std::string& GetString() { return string; }
+    };
+
     class Stream
     {
         std::string data;
@@ -57,23 +67,25 @@ namespace parser
         std::string::const_iterator Current() { return data.begin() + offset; }
         bool IsEOF() { return offset >= data.size(); }
 
-        Position GetPosition()
+        Position GetPosition(size_t _offset)
         {
-            if (offset > data.size())
+            if (_offset > data.size())
                 throw std::runtime_error("Offset is out of range of data!");
 
             size_t line = 0, closestLineStart = 0;
             for (size_t lineStart : lineStarts)
             {
-                if (lineStart > offset)
+                if (lineStart > _offset)
                     break;
 
                 closestLineStart = lineStart;
                 line++;
             }
 
-            return Position{ line, offset - closestLineStart + 1 };
+            return Position{ line, _offset - closestLineStart + 1 };
         }
+
+        Position GetPosition() { return GetPosition(offset); }
 
         void SetPosition(Position _pos)
         {
@@ -94,8 +106,8 @@ namespace parser
     {
     public:
         typedef size_t PatternID;
-        static const PatternID EOF_PATTERN_ID = 0;
-        static const PatternID INVALID_PATTERN_ID = 1;
+        inline static PatternID EOF_PATTERN_ID() { return 0; }
+        inline static PatternID UNKNOWN_PATTERN_ID() { return 1; }
 
         struct Match
         {
@@ -118,7 +130,7 @@ namespace parser
         struct Pattern
         {
             PatternID id;
-            std::regex regex;
+            Regex regex;
             Action action;
         };
 
@@ -128,11 +140,11 @@ namespace parser
     public:
         Lexer(Action _onEOF, Action _onUnknown) : patterns()
         {
-            eof = { .id = EOF_PATTERN_ID, .regex = std::regex(), .action = _onEOF };
-            unknown = { .id = INVALID_PATTERN_ID, .regex = std::regex(), .action = _onUnknown };
+            eof = { .id = EOF_PATTERN_ID(), .regex = Regex(), .action = _onEOF };
+            unknown = { .id = UNKNOWN_PATTERN_ID(), .regex = Regex(), .action = _onUnknown };
         }
 
-        PatternID AddPattern(std::regex _regex, Action _action = std::monostate())
+        PatternID AddPattern(Regex _regex, Action _action = std::monostate())
         {
             patterns.push_back(Pattern{ .id = patterns.size() + 2, .regex = _regex, .action = _action });
             return patterns.back().id;
@@ -143,53 +155,29 @@ namespace parser
             Pattern* matchingPattern = &unknown;
             Match match{ .value = "", .position = _stream.GetPosition() };
 
-            if (_stream.IsEOF()) { matchingPattern = &eof; }
-            else if (!patterns.empty())
+            if (_stream.IsEOF())
             {
-                auto itPattern = patterns.begin();
-                while (itPattern != patterns.end())
+                match.value = std::string(1, (char)EOF);
+                matchingPattern = &eof;
+            }
+            else
+            {
+                for (auto& pattern : patterns)
                 {
                     std::smatch regexMatch;
-                    std::regex_search(_stream.Current(), _stream.End(), regexMatch, itPattern->regex, std::regex_constants::match_continuous);
+                    std::regex_search(_stream.Current(), _stream.End(), regexMatch, pattern.regex, std::regex_constants::match_continuous);
 
                     if (regexMatch.size() == 0)
-                    {
-                        itPattern++;
                         continue;
-                    }
 
                     match.value = regexMatch.str();
                     _stream.Ignore(regexMatch.length()); //Advance stream past matched substring
-
-                    if (std::get_if<Tokenizer>(&itPattern->action))
-                    {
-                        matchingPattern = &*itPattern;
-                        break;
-                    }
-
-                    if (auto procedure = std::get_if<Procedure>(&itPattern->action))
-                        (*procedure)(_stream, match);
-
-                    if (!_skipNonTokens)
-                    {
-                        matchingPattern = &*itPattern;
-                        break;
-                    }
-
-                    match.position = _stream.GetPosition(); //Update match start position for next match
-
-                    if (_stream.IsEOF())
-                    {
-                        matchingPattern = &eof;
-                        break;
-                    }
-
-                    itPattern = patterns.begin();
+                    matchingPattern = &pattern;
                 }
             }
 
-            if (matchingPattern->id == EOF_PATTERN_ID) { match.value = std::string(1, (char)EOF); }
-            else if (matchingPattern->id == INVALID_PATTERN_ID) { match.value = std::string(1, _stream.Get()); }
+            if (matchingPattern == &unknown)
+                match.value = std::string(1, _stream.Get());
 
             Result result = {
                 .patternID = matchingPattern->id,
@@ -197,8 +185,8 @@ namespace parser
                 .match = match
             };
 
-            if (auto tokenizer = std::get_if<Tokenizer>(&matchingPattern->action))
-                result.value = (*std::get<Tokenizer>(matchingPattern->action))(_stream, match);
+            if (auto action = std::get_if<Tokenizer>(&matchingPattern->action)) { result.value = (*action)(_stream, match); }
+            else if (auto action = std::get_if<Procedure>(&matchingPattern->action)) { (*action)(_stream, match); }
 
             return result;
         }
