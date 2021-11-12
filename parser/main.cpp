@@ -3,129 +3,119 @@
 #include <sstream>
 #include <any>
 #include <assert.h>
+#include <unordered_map>
 
 namespace parser
 {
-    class Grammar;
-
-    class Symbol
+    class Parser
     {
-        std::string name;
-
-    protected:
-        Symbol(std::string _name) : name(_name) { }
-
     public:
-        virtual ~Symbol() { }
+        typedef std::string SymbolID;
+        typedef Lexer::PatternID Terminal;
 
-        virtual std::any Parse(Stream& _stream, const Grammar* _grammar) = 0;
-
-        const std::string& GetName() { return name; }
-    };
-
-    class Grammar
-    {
-        std::map<std::string, Symbol*> symbols;
-
-    public:
-        Grammar(const std::vector<Symbol*>& _symbols)
+        struct NonTerminal
         {
-            for (auto& symbol : _symbols)
+            typedef void(*Procedure)(Stream&, const std::vector<std::any>&);
+            typedef std::any(*Function)(Stream&, const std::vector<std::any>&);
+            typedef std::variant<Procedure, Function, std::monostate> Action;
+            typedef std::variant<SymbolID, std::regex> Component;
+
+            struct Rule
             {
-                if (!symbols.emplace(symbol->GetName(), symbol).second)
-                    throw Error::DuplicateSymbolName(symbol->GetName());
-            }
-        }
+                std::vector<Component> components;
+                Action action;
+            };
 
-        ~Grammar()
+            std::vector<Rule> rules;
+        };
+
+        struct Result
         {
-            for (auto& [_, sym] : symbols)
-                delete sym;
-        }
-
-        std::optional<Symbol*> GetSymbol(const std::string& _name)
-        {
-            auto symbolSearch = symbols.find(_name);
-            return symbolSearch == symbols.end() ? std::optional<Symbol*>() : symbolSearch->second;
-        }
-
-        std::any Parse(const std::string& _symbolName, Stream& _stream)
-        {
-            auto symbol = GetSymbol(_symbolName);
-            if (!symbol.has_value())
-                throw Error::UnknownSymbol(_symbolName);
-
-            return symbol.value()->Parse(_stream, this);
-        }
-    };
-
-    template<typename T>
-    class Terminal : public Symbol
-    {
-    public:
-        typedef T(*Callback)(Stream& _stream, const std::string& _value);
+            SymbolID symbolID;
+            std::any value;
+        };
 
     private:
-        std::regex regex;
-        Callback onMatch;
+        typedef std::variant<Terminal, NonTerminal> Symbol;
+        std::unordered_map<SymbolID, Symbol> symbols;
+
+        Lexer lexer;
+        bool validated;
+    public:
+        Parser(Lexer::Action _onEOF, Lexer::Action _onUnknown) : lexer(_onEOF, _onUnknown), validated(true) { }
+    private:
+        void AddSymbol(SymbolID _id, Symbol _symbol)
+        {
+            if (_id.empty()) { throw std::runtime_error("Symbol id must be non-empty!"); }
+            else if (!symbols.emplace(_id, _symbol).second) { throw std::runtime_error("Symbol ID '" + _id + "' is already in use."); }
+        }
 
     public:
-        Terminal(std::string _name, std::string _regex, Callback _onMatch) : Symbol(_name), regex(_regex), onMatch(_onMatch) { }
+        void AddTerminal(SymbolID _id, Lexer::PatternID _patternID) { AddSymbol(_id, _patternID); }
 
-        std::any Parse(Stream& _stream, const Grammar* _grammar) override
+        void AddRule(SymbolID _ntID, std::initializer_list<NonTerminal::Component> _components, NonTerminal::Action _action = std::monostate())
         {
-            std::smatch match;
-            std::regex_search(_stream.Current(), _stream.End(), match, regex, std::regex_constants::match_continuous);
+            auto symbolSearch = symbols.find(_ntID);
+            if (symbolSearch == symbols.end()) { AddSymbol(_ntID, NonTerminal()); }
+            else if (std::get_if<Terminal>(&symbolSearch->second)) { throw std::runtime_error("'" + _ntID + "' does not refer to a non-terminal!"); }
 
-            if (match.size() == 0)
-                throw Error::CannotParseSymbol(GetName());
+            //Add regex components to lexer so that they get lexed like terminals and return a token (the matched value)
+            for (auto& component : _components)
+            {
+                if (auto regex = std::get_if<std::regex>(&component))
+                    lexer.AddPattern(*regex, [](Stream& _stream, const Lexer::Match& _match) { return std::any(_match.value); });
+            }
 
-            _stream.Ignore(match.length()); //Advance stream past matched substring
-            return onMatch(_stream, match.str());
+            std::get<NonTerminal>(symbols.at(_ntID)).rules.push_back(NonTerminal::Rule{ .components = _components, .action = _action }); //Add rule to non-terminal
+            validated = false;
+        }
+
+        void Validate()
+        {
+            for (auto& [symbolID, symbol] : symbols)
+            {
+                if (auto nt = std::get_if<NonTerminal>(&symbol))
+                {
+                    for (auto& rule : nt->rules)
+                    {
+                        for (auto& component : rule.components)
+                        {
+                            if (auto id = std::get_if<SymbolID>(&component))
+                            {
+                                auto symbolSearch = symbols.find(*id);
+                                if (symbolSearch == symbols.end())
+                                    throw std::runtime_error("Nonterminal '" + symbolID + "' references a symbol that does not exist: '" + *id + "'");
+                            }
+                        }
+                    }
+                }
+            }
+
+            validated = true;
+        }
+
+        Result Parse(Stream& _stream, SymbolID _symbolID)
+        {
+            if (!validated)
+                Validate();
+
+            auto symbolSearch = symbols.find(_symbolID);
+            if (symbolSearch == symbols.end())
+                throw std::runtime_error("Symbol with id '" + _symbolID + "' does not exist!");
+
+            if (std::get_if<Terminal>(&symbolSearch->second))
+            {
+                auto peek = lexer.Lex(_stream);
+
+                return Result();
+            }
+            else
+            {
+                NonTerminal& nt = std::get<NonTerminal>(symbolSearch->second);
+                return Result();
+            }
         }
     };
-
-    // template<typename T>
-    // class NonTerminal : public Symbol
-    // {
-    // public:
-    //     typedef T(*Callback)(Stream& _stream, const std::vector<std::any>& _args);
-    //     typedef std::variant<std::string, std::regex> Component;
-
-    // private:
-    //     std::vector<Component> components;
-    //     Callback onMatch;
-
-    // public:
-    //     NonTerminal(std::string _name, const std::vector<Component>& _components, Callback _onMatch) : Symbol(_name), components(_components), onMatch(_onMatch) { }
-
-    //     std::any Parse(Stream& _stream, const Grammar* _grammar) override
-    //     {
-    //         auto streamPos = _stream.position;
-    //         std::vector<std::any> args;
-
-    //         for (auto& component : components)
-    //         {
-    //             if (auto symbolName = std::get_if<std::string>(&component))
-    //             {
-    //                 auto symbol = _grammar->GetSymbol(*symbolName);
-    //                 if (!symbol.has_value())
-    //                     throw Error::UnknownSymbol(*symbolName);
-
-    //                 args.push_back(symbol.value()->Parse(_stream, _grammar)));
-    //             }
-    //         }
-
-    //         std::smatch match;
-    //         std::regex_search(_stream.Current(), _stream.End(), match, regex, std::regex_constants::match_continuous);
-
-    //         if (match.size() == 0)
-    //             throw Error::CannotParseSymbol(GetName());
-
-    //         _stream.Ignore(match.length()); //Advance stream past matched substring
-    //         return onMatch(_stream, match.str());
-    //     }
-    // };
 }
 
 using namespace parser;
@@ -159,43 +149,34 @@ public:
 
 int main()
 {
+    std::ifstream file("test.txt");
+    Stream input(file);
+
+    auto eofAction = [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::END_OF_FILE(_match.position)); };
+    auto unknownAction = [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::INVALID(_match.value, _match.position)); };
+    Lexer lexer(eofAction, unknownAction);
+    lexer.AddPattern(std::regex("(_|[a-zA-Z])(_|[a-zA-Z0-9])*"), [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::ID(_match.value, _match.position)); });
+    lexer.AddPattern(std::regex("-?(0|[1-9][0-9]*)([.][0-9]+)?"), [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::NUM(std::stod(_match.value), _match.position)); });
+    lexer.AddPattern(std::regex("\\s"));
+    lexer.AddPattern(std::regex(":"), [](Stream& _stream, const Lexer::Match& _match) { std::cout << "I spot a colon!" << std::endl; });
+
     while (true)
     {
-        std::cout << "Enter text to lex: ";
-        std::string inputLine;
-        std::getline(std::cin, inputLine);
+        Lexer::Result result = lexer.Lex(input);
+        Token token = std::any_cast<Token>(result.value);
+        std::cout << token.GetPosition() << " ";
 
-            if (inputLine.empty())
-                break;
-
-        std::cout << "Result:\n";
-        Stream input(inputLine);
-
-        auto eofAction = [](Stream& _stream, const Lexer<Token>::Match& _match) { return Token::END_OF_FILE(_match.position); };
-        auto invalidAction = [](Stream& _stream, const Lexer<Token>::Match& _match) { return Token::INVALID(_match.value, _match.position); };
-        Lexer<Token> lexer(eofAction, invalidAction);
-        lexer.AddPattern("ID", std::regex("(_|[a-zA-Z])(_|[a-zA-Z0-9])*"), [](Stream& _stream, const Lexer<Token>::Match& _match) { return Token::ID(_match.value, _match.position); });
-        lexer.AddPattern("NUM", std::regex("-?(0|[1-9][0-9]*)([.][0-9]+)?"), [](Stream& _stream, const Lexer<Token>::Match& _match) { return Token::NUM(std::stod(_match.value), _match.position); });
-        lexer.AddPattern(std::regex(" "));
-        lexer.AddPattern(std::regex(":"), [](Stream& _stream, const Lexer<Token>::Match& _match) { std::cout << "I spot a colon!" << std::endl; });
-
-        while (true)
+        switch (token.GetType())
         {
-            Token token = lexer.Lex(input).token;
-            std::cout << token.GetPosition() << " ";
-
-            switch (token.GetType())
-            {
-            case TokenType::ID: std::cout << "ID: " << token.GetValue<std::string>() << std::endl; break;
-            case TokenType::NUM: std::cout << "NUM: " << token.GetValue<double>() << std::endl; break;
-            case TokenType::INVALID: std::cout << "INVALID: " << token.GetValue<std::string>() << std::endl; break;
-            case TokenType::END_OF_FILE: std::cout << "EOF" << std::endl; break;
-            default: assert(false && "Case not handled!");
-            }
-
-            if (token.GetType() == TokenType::END_OF_FILE)
-                break;
+        case TokenType::ID: std::cout << "ID: " << token.GetValue<std::string>() << std::endl; break;
+        case TokenType::NUM: std::cout << "NUM: " << token.GetValue<double>() << std::endl; break;
+        case TokenType::INVALID: std::cout << "INVALID: " << token.GetValue<std::string>() << std::endl; break;
+        case TokenType::END_OF_FILE: std::cout << "EOF" << std::endl; break;
+        default: assert(false && "Case not handled!");
         }
+
+        if (result.patternID == Lexer::EOF_PATTERN_ID)
+            break;
     }
 
     return 0;

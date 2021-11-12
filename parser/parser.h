@@ -3,6 +3,8 @@
 #include <variant>
 #include <map>
 #include <optional>
+#include <any>
+#include <fstream>
 
 namespace parser
 {
@@ -26,23 +28,25 @@ namespace parser
 
     class Stream
     {
-        const std::string& data;
-        std::vector<size_t> newLines;
+        std::string data;
+        std::vector<size_t> lineStarts;
 
     public:
         size_t offset;
 
-        Stream(const std::string& _data, size_t _offset = 0) : data(_data), offset(_offset)
+        Stream(std::string&& _data, size_t _offset = 0) : data(std::move(_data)), offset(_offset)
         {
-            //Find new lines 
-            newLines.push_back(0);
-            size_t pos = _data.find("\n", 0);
-            while (pos != std::string::npos)
+            //Get line starts
+            lineStarts.push_back(0);
+
+            for (size_t position = 0; position < data.size(); position++)
             {
-                newLines.push_back(pos);
-                pos = _data.find("\n", pos + 1);
+                if (data[position] == '\n')
+                    lineStarts.push_back(position + 1);
             }
         }
+
+        Stream(std::istream& _stream) : Stream(std::string((std::istreambuf_iterator<char>(_stream)), std::istreambuf_iterator<char>())) { }
 
         char Peek() { return IsEOF() ? (const char)EOF : data[offset]; }
         char Get() { return IsEOF() ? (const char)EOF : data[offset++]; }
@@ -55,24 +59,44 @@ namespace parser
 
         Position GetPosition()
         {
-            Position position;
+            if (offset > data.size())
+                throw std::runtime_error("Offset is out of range of data!");
 
-            for (size_t line = 0; line < newLines.size(); line++)
+            size_t line = 0, closestLineStart = 0;
+            for (size_t lineStart : lineStarts)
             {
-                size_t newLineOffset = newLines[line];
+                if (lineStart > offset)
+                    break;
 
-                if (offset >= newLineOffset)
-                    position = Position{ .line = line, .column = offset - newLineOffset };
+                closestLineStart = lineStart;
+                line++;
             }
 
-            return position;
+            return Position{ line, offset - closestLineStart + 1 };
+        }
+
+        void SetPosition(Position _pos)
+        {
+            if (_pos.line > lineStarts.size() || _pos.line == 0 || _pos.column == 0)
+                throw std::runtime_error("Invaild position: " + _pos.ToString());
+
+            size_t lineStart = lineStarts[_pos.line - 1];
+            size_t lineWidth = (_pos.line == lineStarts.size() ? data.size() : lineStarts[_pos.line]) - lineStart;
+
+            if (_pos.column - 1 > lineWidth)
+                throw std::runtime_error("Invaild position: " + _pos.ToString());
+
+            offset = lineStart + _pos.column - 1;
         }
     };
 
-    template<typename Token>
     class Lexer
     {
     public:
+        typedef size_t PatternID;
+        static const PatternID EOF_PATTERN_ID = 0;
+        static const PatternID INVALID_PATTERN_ID = 1;
+
         struct Match
         {
             std::string value;
@@ -80,15 +104,16 @@ namespace parser
         };
 
         typedef void(*Procedure)(Stream&, const Match&);
-        typedef Token(*Tokenizer)(Stream&, const Match&);
+        typedef std::any(*Tokenizer)(Stream&, const Match&);
         typedef std::variant<Procedure, Tokenizer, std::monostate> Action;
-        typedef std::string PatternID;
 
         struct Result
         {
             PatternID patternID;
-            Token token;
+            std::any value;
+            Match match;
         };
+
     private:
         struct Pattern
         {
@@ -98,40 +123,24 @@ namespace parser
         };
 
         std::vector<Pattern> patterns;
-        std::map<std::string, size_t> namedPatterns;
-        Pattern eof, invalid;
+        Pattern eof, unknown;
 
     public:
-        Lexer(Tokenizer _eofTokenizer, Tokenizer _invalidTokenizer, PatternID _eofPatternID = "<EOF>", PatternID _invalidPatternID = "<INVALID>")
-            : patterns(), namedPatterns()
+        Lexer(Action _onEOF, Action _onUnknown) : patterns()
         {
-            if (_eofPatternID.empty()) { throw std::runtime_error("EOF token pattern id must be non-empty!"); }
-            else if (_invalidPatternID.empty()) { throw std::runtime_error("Invalid token pattern id must be non-empty!"); }
-            else if (_eofPatternID == _invalidPatternID) { throw std::runtime_error("EOF and invalid token pattern ids must be distinct!"); }
-
-            eof = { .id = _eofPatternID, .regex = std::regex(), .action = _eofTokenizer };
-            invalid = { .id = _invalidPatternID, .regex = std::regex(), .action = _invalidTokenizer };
+            eof = { .id = EOF_PATTERN_ID, .regex = std::regex(), .action = _onEOF };
+            unknown = { .id = INVALID_PATTERN_ID, .regex = std::regex(), .action = _onUnknown };
         }
 
-        void AddPattern(std::regex _regex) { patterns.push_back(Pattern{ .id = "", .regex = _regex, .action = std::monostate() }); }
-        void AddPattern(std::regex _regex, Procedure _prod) { patterns.push_back(Pattern{ .id = "", .regex = _regex, .action = _prod }); }
-
-        void AddPattern(PatternID _id, std::regex _regex, Action _action)
+        PatternID AddPattern(std::regex _regex, Action _action = std::monostate())
         {
-            if (_id.empty())
-                throw std::runtime_error("ID must be non-empty!");
-
-            auto search = namedPatterns.find(_id);
-            if (search != namedPatterns.end() || _id == eof.id)
-                throw std::runtime_error("Pattern with name '" + _id + "' already exists.");
-
-            namedPatterns[_id] = patterns.size();
-            patterns.push_back(Pattern{ .id = _id, .regex = _regex, .action = _action });
+            patterns.push_back(Pattern{ .id = patterns.size() + 2, .regex = _regex, .action = _action });
+            return patterns.back().id;
         }
 
-        Result Lex(Stream& _stream)
+        Result Lex(Stream& _stream, bool _skipNonTokens = true)
         {
-            Pattern* matchingPattern = &invalid;
+            Pattern* matchingPattern = &unknown;
             Match match{ .value = "", .position = _stream.GetPosition() };
 
             if (_stream.IsEOF()) { matchingPattern = &eof; }
@@ -152,33 +161,46 @@ namespace parser
                     match.value = regexMatch.str();
                     _stream.Ignore(regexMatch.length()); //Advance stream past matched substring
 
-                    if (itPattern->id.empty()) //Pattern does not define a token
+                    if (std::get_if<Tokenizer>(&itPattern->action))
                     {
-                        if (auto procedure = std::get_if<Procedure>(&itPattern->action))
-                            (*procedure)(_stream, match);
-
-                        match.position = _stream.GetPosition(); //Update match start position for next match
-
-                        if (_stream.IsEOF())
-                        {
-                            matchingPattern = &eof;
-                            break;
-                        }
-
-                        itPattern = patterns.begin();
-                        continue;
+                        matchingPattern = &*itPattern;
+                        break;
                     }
 
-                    matchingPattern = &*itPattern;
-                    break;
+                    if (auto procedure = std::get_if<Procedure>(&itPattern->action))
+                        (*procedure)(_stream, match);
+
+                    if (!_skipNonTokens)
+                    {
+                        matchingPattern = &*itPattern;
+                        break;
+                    }
+
+                    match.position = _stream.GetPosition(); //Update match start position for next match
+
+                    if (_stream.IsEOF())
+                    {
+                        matchingPattern = &eof;
+                        break;
+                    }
+
+                    itPattern = patterns.begin();
                 }
             }
 
-            if (matchingPattern->id == eof.id) { match.value = std::string(1, (char)EOF); }
-            else if (matchingPattern->id == invalid.id) { match.value = std::string(1, _stream.Get()); }
+            if (matchingPattern->id == EOF_PATTERN_ID) { match.value = std::string(1, (char)EOF); }
+            else if (matchingPattern->id == INVALID_PATTERN_ID) { match.value = std::string(1, _stream.Get()); }
 
-            auto tokenizer = std::get<Tokenizer>(matchingPattern->action);
-            return Result{ .patternID = matchingPattern->id, .token = (*tokenizer)(_stream, match) };
+            Result result = {
+                .patternID = matchingPattern->id,
+                .value = std::any(),
+                .match = match
+            };
+
+            if (auto tokenizer = std::get_if<Tokenizer>(&matchingPattern->action))
+                result.value = (*std::get<Tokenizer>(matchingPattern->action))(_stream, match);
+
+            return result;
         }
     };
 }
