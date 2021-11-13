@@ -105,7 +105,7 @@ namespace parser
 
                 while (true)
                 {
-                    peek = lexer.Lex(_stream);
+                    peek = lexer.GetMatch(_stream);
 
                     auto terminalSearch = terminals.find(peek.patternID);
                     if (terminalSearch == terminals.end())
@@ -125,7 +125,7 @@ namespace parser
                     throw std::runtime_error("Expected '" + _symbolID + "' but found '" + terminalSearch->second + "'");
                 }
 
-                return Result{ .position = peek.match.position, .value = peek.value };
+                return Result{ .position = _stream.GetPosition(peek.match.start), .value = peek.value };
             }
             else
             {
@@ -233,17 +233,17 @@ int main()
     std::ifstream file("test.txt");
     Stream input(file);
 
-    // auto eofAction = [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::END_OF_FILE(_match.position)); };
-    // auto unknownAction = [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::INVALID(_match.value, _match.position)); };
+    // auto eofAction = [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::END_OF_FILE(_match.position)); };
+    // auto unknownAction = [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::INVALID(_match.value, _match.position)); };
     // Lexer lexer(eofAction, unknownAction);
     // lexer.AddPattern(Regex("\\s"));
-    // lexer.AddPattern(Regex(":"), [](Stream& _stream, const Lexer::Match& _match) { std::cout << "I spot a colon!" << std::endl; });
+    // lexer.AddPattern(Regex(":"), [](Stream& _stream, const LexerMatch& _match) { std::cout << "I spot a colon!" << std::endl; });
 
     // std::map<Lexer::PatternID, TokenType> tokens = {
     //     { Lexer::EOF_PATTERN_ID(), TokenType::END_OF_FILE },
     //     { Lexer::UNKNOWN_PATTERN_ID(), TokenType::INVALID },
-    //     { lexer.AddPattern(Regex("(_|[a-zA-Z])(_|[a-zA-Z0-9])*"), [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::ID(_match.value, _match.position)); }), TokenType::ID },
-    //     { lexer.AddPattern(Regex("-?(0|[1-9][0-9]*)([.][0-9]+)?"), [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::NUM(std::stod(_match.value), _match.position)); }), TokenType::NUM }
+    //     { lexer.AddPattern(Regex("(_|[a-zA-Z])(_|[a-zA-Z0-9])*"), [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::ID(_match.value, _match.position)); }), TokenType::ID },
+    //     { lexer.AddPattern(Regex("-?(0|[1-9][0-9]*)([.][0-9]+)?"), [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::NUM(std::stod(_match.value), _match.position)); }), TokenType::NUM }
     // };
 
     // while (true)
@@ -270,17 +270,17 @@ int main()
     //         break;
     // }
 
-    auto eofAction = [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::END_OF_FILE(_match.position)); };
-    auto unknownAction = [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::INVALID(_match.value, _match.position)); };
+    auto eofAction = [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::END_OF_FILE(_match.GetPosition(_stream))); };
+    auto unknownAction = [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::INVALID(_match.GetValue(_stream), _match.GetPosition(_stream))); };
 
     Parser parser("EOF", eofAction, unknownAction);
     parser.lexer.AddPattern(Regex("\\s"));
-    parser.lexer.AddPattern(Regex(":"), [](Stream& _stream, const Lexer::Match& _match) { std::cout << "I spot a colon!" << std::endl; });
-    parser.AddTerminal("let", Regex("let"), [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::KW_LET(_match.position)); });
-    parser.AddTerminal("=", Regex("="), [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::SYM_EQ(_match.position)); });
-    parser.AddTerminal(";", Regex(";"), [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::SYM_SEMICOLON(_match.position)); });
-    parser.AddTerminal("ID", Regex("(_|[a-zA-Z])(_|[a-zA-Z0-9])*"), [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::ID(_match.value, _match.position)); });
-    parser.AddTerminal("NUM", Regex("-?(0|[1-9][0-9]*)([.][0-9]+)?"), [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::NUM(std::stod(_match.value), _match.position)); });
+    parser.lexer.AddPattern(Regex(":"), [](Stream& _stream, const LexerMatch& _match) { std::cout << "I spot a colon!" << std::endl; });
+    parser.AddTerminal("let", Regex("let"), [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::KW_LET(_match.GetPosition(_stream))); });
+    parser.AddTerminal("=", Regex("="), [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::SYM_EQ(_match.GetPosition(_stream))); });
+    parser.AddTerminal(";", Regex(";"), [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::SYM_SEMICOLON(_match.GetPosition(_stream))); });
+    parser.AddTerminal("ID", Regex("(_|[a-zA-Z])(_|[a-zA-Z0-9])*"), [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::ID(_match.GetValue(_stream), _match.GetPosition(_stream))); });
+    parser.AddTerminal("NUM", Regex("-?(0|[1-9][0-9]*)([.][0-9]+)?"), [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::NUM(std::stod(_match.GetValue(_stream)), _match.GetPosition(_stream))); });
     parser.AddRule("DECL", { "let", "ID", "=", "EXPR", ";" }, [](Stream& _stream, const std::vector<Parser::Rule::Arg>& _args) { std::cout << "Found a declaration!" << std::endl; });
     parser.AddRule("EXPR", { "NUM" }, [](Stream& _stream, const std::vector<Parser::Rule::Arg>& _args) { return _args[0].value; });
     parser.AddRule("EXPR", { "ID" }, [](Stream& _stream, const std::vector<Parser::Rule::Arg>& _args) { return _args[0].value; });
