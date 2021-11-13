@@ -3,6 +3,8 @@
     ☐ add unicode support
 ☐ parser
     ☐ add tests
+    ☐ separteb lexer from parser
+    ☐ custom exceptions
 ☐ unittest
     ☐ README
 

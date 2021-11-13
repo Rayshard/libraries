@@ -25,9 +25,8 @@ namespace parser
             typedef void(*Procedure)(Stream&, const std::vector<Arg>&);
             typedef std::any(*Function)(Stream&, const std::vector<Arg>&);
             typedef std::variant<Procedure, Function, std::monostate> Action;
-            typedef std::variant<SymbolID, Regex> Component;
 
-            std::vector<Component> components;
+            std::vector<SymbolID> components;
             Action action;
         };
 
@@ -58,18 +57,11 @@ namespace parser
         void AddTerminal(SymbolID _id, Lexer::PatternID _patternID) { AddSymbol(_id, _patternID); }
         void AddTerminal(SymbolID _id, Regex _regex, Lexer::Action _action = std::monostate()) { AddSymbol(_id, lexer.AddPattern(_regex, _action)); }
 
-        void AddRule(SymbolID _ntID, std::initializer_list<Rule::Component> _components, Rule::Action _action = std::monostate())
+        void AddRule(SymbolID _ntID, std::initializer_list<SymbolID> _components, Rule::Action _action = std::monostate())
         {
             auto symbolSearch = symbols.find(_ntID);
             if (symbolSearch == symbols.end()) { AddSymbol(_ntID, NonTerminal()); }
-            else if (std::get_if<Terminal>(&symbolSearch->second)) { throw std::runtime_error("'" + _ntID + "' does not refer to a non-terminal!"); }
-
-            //Add regex components to lexer so that they get lexed like terminals and return a token (the matched value)
-            for (auto& component : _components)
-            {
-                if (auto regex = std::get_if<Regex>(&component))
-                    lexer.AddPattern(*regex, [](Stream& _stream, const Lexer::Match& _match) { return std::any(_match.value); });
-            }
+            else if (std::get_if<Terminal>(&symbolSearch->second)) { throw std::runtime_error("'" + _ntID + "' refers to a terminal. Rules can only be added to non-terminals!"); }
 
             std::get<NonTerminal>(symbols.at(_ntID)).push_back(Rule{ .components = _components, .action = _action }); //Add rule to non-terminal
             validated = false;
@@ -85,12 +77,9 @@ namespace parser
                     {
                         for (auto& component : rule.components)
                         {
-                            if (auto id = std::get_if<SymbolID>(&component))
-                            {
-                                auto symbolSearch = symbols.find(*id);
-                                if (symbolSearch == symbols.end())
-                                    throw std::runtime_error("Nonterminal '" + symbolID + "' references a symbol that does not exist: '" + *id + "'");
-                            }
+                            auto symbolSearch = symbols.find(component);
+                            if (symbolSearch == symbols.end())
+                                throw std::runtime_error("Nonterminal '" + symbolID + "' references a symbol that does not exist: '" + component + "'");
                         }
                     }
                 }
@@ -141,7 +130,7 @@ namespace parser
             else
             {
                 NonTerminal& nt = std::get<NonTerminal>(symbolSearch->second);
-                struct { size_t streamOffset; std::vector<Rule::Component*> components; } furthestComponentsParsed;
+                struct { size_t streamOffset; std::vector<SymbolID*> components; } furthestComponentsParsed;
                 furthestComponentsParsed.streamOffset = parseStart;
 
                 for (auto& rule : nt)
@@ -154,15 +143,7 @@ namespace parser
                         if (_stream.offset > furthestComponentsParsed.streamOffset) { furthestComponentsParsed = { .streamOffset = _stream.offset, .components = { &component } }; }
                         else if (_stream.offset == furthestComponentsParsed.streamOffset || _stream.offset == parseStart) { furthestComponentsParsed.components.push_back(&component); }
 
-                        try
-                        {
-                            if (auto symbolID = std::get_if<SymbolID>(&component)) { args.push_back(Parse(_stream, *symbolID)); }
-                            else
-                            {
-                                auto match = lexer.Lex(_stream).match;
-                                args.push_back(Rule::Arg{ .position = match.position, .value = match.value });
-                            }
-                        }
+                        try { args.push_back(Parse(_stream, component)); }
                         catch (const std::runtime_error& e)
                         {
                             parsed = false;
@@ -189,19 +170,17 @@ namespace parser
 
                 //None of the rules were parsable
                 _stream.offset = parseStart;
-
-                std::unordered_set<std::string> expecteds;
-                for (auto& component : furthestComponentsParsed.components)
-                {
-                    if (auto symbolID = std::get_if<SymbolID>(component)) { expecteds.insert("'" + *symbolID + "'"); }
-                    else { expecteds.insert("REGEX(" + std::get<Regex>(*component).GetString() + ")"); }
-                }
-
+                
+                //Throw error
                 std::stringstream errorSS;
                 errorSS << "Unable to parse '" << _symbolID << "'. Expected one of { ";
 
+                std::unordered_set<std::string*> expecteds(furthestComponentsParsed.components.begin(), furthestComponentsParsed.components.end());
                 for (auto& expected : expecteds)
-                    errorSS << expected << ",";
+                    errorSS << *expected << ",";
+
+                if(!expecteds.empty())
+                    errorSS.get(); //Remove trailing comma
 
                 errorSS << " }.";
                 throw std::runtime_error(errorSS.str());
@@ -214,13 +193,19 @@ using namespace parser;
 
 enum class TokenType
 {
-    ID, NUM, INVALID, END_OF_FILE
+    ID,
+    NUM,
+    KW_LET,
+    SYM_EQ,
+    SYM_SEMICOLON,
+    INVALID,
+    END_OF_FILE
 };
 
 class Token
 {
     TokenType type;
-    std::optional<std::any> value;
+    std::any value;
     Position position;
 
     Token(TokenType _type, Position _pos) : type(_type), value(), position(_pos) {}
@@ -231,12 +216,16 @@ public:
     const Position& GetPosition() const { return position; }
 
     template<typename T>
-    const T GetValue() const { return std::any_cast<T>(value.value()); }
+    const T GetValue() const { return std::any_cast<T>(value); }
 
     static Token END_OF_FILE(Position _pos) { return Token(TokenType::END_OF_FILE, _pos); }
     static Token INVALID(const std::string& _text, Position _pos) { return Token(TokenType::INVALID, _text, _pos); }
     static Token ID(const std::string& _id, Position _pos) { return Token(TokenType::ID, _id, _pos); }
     static Token NUM(double _value, Position _pos) { return Token(TokenType::NUM, _value, _pos); }
+    static Token KW_LET(Position _pos) { return Token(TokenType::KW_LET, _pos); }
+    static Token SYM_EQ(Position _pos) { return Token(TokenType::SYM_EQ, _pos); }
+    static Token SYM_SEMICOLON(Position _pos) { return Token(TokenType::SYM_SEMICOLON, _pos); }
+
 };
 
 int main()
@@ -287,9 +276,14 @@ int main()
     Parser parser("EOF", eofAction, unknownAction);
     parser.lexer.AddPattern(Regex("\\s"));
     parser.lexer.AddPattern(Regex(":"), [](Stream& _stream, const Lexer::Match& _match) { std::cout << "I spot a colon!" << std::endl; });
+    parser.AddTerminal("let", Regex("let"), [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::KW_LET(_match.position)); });
+    parser.AddTerminal("=", Regex("="), [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::SYM_EQ(_match.position)); });
+    parser.AddTerminal(";", Regex(";"), [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::SYM_SEMICOLON(_match.position)); });
     parser.AddTerminal("ID", Regex("(_|[a-zA-Z])(_|[a-zA-Z0-9])*"), [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::ID(_match.value, _match.position)); });
     parser.AddTerminal("NUM", Regex("-?(0|[1-9][0-9]*)([.][0-9]+)?"), [](Stream& _stream, const Lexer::Match& _match) { return std::any(Token::NUM(std::stod(_match.value), _match.position)); });
-    parser.AddRule("DECL", { Regex("let"), "ID", Regex("="), "NUM", Regex(";") }, [](Stream& _stream, const std::vector<Parser::Rule::Arg>& _args) { std::cout << "Found a declaration!" << std::endl; });
+    parser.AddRule("DECL", { "let", "ID", "=", "EXPR", ";" }, [](Stream& _stream, const std::vector<Parser::Rule::Arg>& _args) { std::cout << "Found a declaration!" << std::endl; });
+    parser.AddRule("EXPR", { "NUM" }, [](Stream& _stream, const std::vector<Parser::Rule::Arg>& _args) { return _args[0].value; });
+    parser.AddRule("EXPR", { "ID" }, [](Stream& _stream, const std::vector<Parser::Rule::Arg>& _args) { return _args[0].value; });
 
     try
     {

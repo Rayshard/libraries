@@ -18,24 +18,10 @@
         "string_literal": {}
     },
     "nonterminals": {
-        "VARDECL": {
+        "DECL": {
             "rules": [
-                {
-                    "pattern": [
-                        {
-                            "terminal": "ID",
-                            "name": "id"
-                        },
-                        {
-                            "regex": "="
-                        },
-                        {
-                            "nonterminal": "EXPR",
-                            "name": "expr"
-                        }
-                    ],
-                    "return": "VarDecl()"
-                }
+                {"name": "full", "production": ["let", "ID", "=", "EXPR", ";"]},
+                {"name": "no_expr", "production": ["let", "ID", ";"]}
             ],
             "action": "print(\"Found variable declaration!\")"
         }

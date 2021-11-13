@@ -5,6 +5,7 @@
 #include <optional>
 #include <any>
 #include <fstream>
+#include <iostream> //TODO: remove
 
 namespace parser
 {
@@ -36,36 +37,50 @@ namespace parser
         const std::string& GetString() { return string; }
     };
 
-    class Stream
+    template<typename T>
+    class IStream
     {
-        std::string data;
-        std::vector<size_t> lineStarts;
-
+    protected:
+        std::vector<T> data;
+        T eof;
     public:
         size_t offset;
 
-        Stream(std::string&& _data, size_t _offset = 0) : data(std::move(_data)), offset(_offset)
+        IStream(std::vector<T>&& _data, T _eof) : data(std::move(_data)), eof(_eof), offset(0) { }
+
+        T Peek() { return IsEOF() ? eof : data[offset]; }
+        T Get() { return IsEOF() ? eof : data[offset++]; }
+        void Ignore(size_t _amt) { offset += _amt; }
+
+        typename std::vector<T>::iterator Begin() { return data.begin(); }
+        typename std::vector<T>::iterator End() { return data.end(); }
+        typename std::vector<T>::iterator Current() { return data.begin() + offset; }
+
+        typename std::vector<T>::iterator CBegin() const { return Begin(); }
+        typename std::vector<T>::iterator CEnd() const { return End(); }
+        typename std::vector<T>::iterator CCurrent() const { return Current(); }
+
+        bool IsEOF() { return offset >= data.size(); }
+    };
+
+    class Stream : public IStream<char>
+    {
+        std::vector<size_t> lineStarts;
+
+    public:
+        Stream(std::string&& _data) : IStream(std::vector<char>(_data.begin(), _data.end()), (char)EOF)
         {
             //Get line starts
             lineStarts.push_back(0);
 
-            for (size_t position = 0; position < data.size(); position++)
+            for (size_t position = 0; position < _data.size(); position++)
             {
-                if (data[position] == '\n')
+                if (_data[position] == '\n')
                     lineStarts.push_back(position + 1);
             }
         }
 
         Stream(std::istream& _stream) : Stream(std::string((std::istreambuf_iterator<char>(_stream)), std::istreambuf_iterator<char>())) { }
-
-        char Peek() { return IsEOF() ? (const char)EOF : data[offset]; }
-        char Get() { return IsEOF() ? (const char)EOF : data[offset++]; }
-        void Ignore(size_t _amt) { offset += _amt; }
-
-        std::string::const_iterator Begin() { return data.begin(); }
-        std::string::const_iterator End() { return data.end(); }
-        std::string::const_iterator Current() { return data.begin() + offset; }
-        bool IsEOF() { return offset >= data.size(); }
 
         Position GetPosition(size_t _offset)
         {
@@ -102,22 +117,116 @@ namespace parser
         }
     };
 
-    class Lexer
+    // class Lexer
+    // {
+    // public:
+    //     typedef size_t PatternID;
+    //     inline static PatternID EOF_PATTERN_ID() { return 0; }
+    //     inline static PatternID UNKNOWN_PATTERN_ID() { return 1; }
+
+    //     struct Match
+    //     {
+    //         std::string value;
+    //         Position position;
+    //     };
+
+    //     typedef void(*Procedure)(Stream&, const Match&);
+    //     typedef std::any(*Tokenizer)(Stream&, const Match&);
+    //     typedef std::variant<Procedure, Tokenizer, std::monostate> Action;
+
+    //     struct Result
+    //     {
+    //         PatternID patternID;
+    //         std::any value;
+    //         Match match;
+    //     };
+
+    // private:
+    //     struct Pattern
+    //     {
+    //         PatternID id;
+    //         Regex regex;
+    //         Action action;
+    //     };
+
+    //     std::vector<Pattern> patterns;
+    //     Pattern eof, unknown;
+
+    // public:
+    //     Lexer(Action _onEOF, Action _onUnknown) : patterns()
+    //     {
+    //         eof = { .id = EOF_PATTERN_ID(), .regex = Regex(), .action = _onEOF };
+    //         unknown = { .id = UNKNOWN_PATTERN_ID(), .regex = Regex(), .action = _onUnknown };
+    //     }
+
+    //     PatternID AddPattern(Regex _regex, Action _action = std::monostate())
+    //     {
+    //         patterns.push_back(Pattern{ .id = patterns.size() + 2, .regex = _regex, .action = _action });
+    //         return patterns.back().id;
+    //     }
+
+    //     Result Lex(Stream& _stream)
+    //     {
+    //         Pattern* matchingPattern = nullptr;
+    //         Match match{ .value = std::string(1, (char)_stream.Peek()), .position = _stream.GetPosition() };
+
+    //         if (_stream.IsEOF()) { matchingPattern = &eof; }
+    //         else
+    //         {
+    //             for (auto& pattern : patterns)
+    //             {
+    //                 const char* current = &*_stream.Current();
+    //                 const char* end = &*_stream.End();
+    //                 std::cmatch regexMatch;
+    //                 std::regex_search(current, end, regexMatch, pattern.regex, std::regex_constants::match_continuous);
+
+    //                 if (regexMatch.size() == 0)
+    //                     continue;
+
+    //                 //If this is the first match or this match has a strictly greater length than
+    //                 //any previous match, set it as the match 
+    //                 std::string matchStr = regexMatch.str();
+    //                 if (!matchingPattern || matchStr.size() > match.value.size())
+    //                 {
+    //                     match.value = matchStr;
+    //                     matchingPattern = &pattern;
+    //                 }
+    //             }
+
+    //             if (!matchingPattern)
+    //                 matchingPattern = &unknown;
+    //         }
+
+    //         _stream.Ignore(match.value.size()); //Advance stream past matched substring
+
+    //         Result result = {
+    //             .patternID = matchingPattern->id,
+    //             .value = std::any(),
+    //             .match = match
+    //         };
+
+    //         if (auto action = std::get_if<Tokenizer>(&matchingPattern->action)) { result.value = (*action)(_stream, match); }
+    //         else if (auto action = std::get_if<Procedure>(&matchingPattern->action)) { (*action)(_stream, match); }
+
+    //         return result;
+    //     }
+    // };
+
+    template<typename Unit, typename PatternTemplate>
+    class PatternMatcher
     {
     public:
+        typedef std::optional<size_t>(*Matcher)(const IStream<Unit>&, const PatternTemplate&);
+
+        struct Match { size_t start, size; };
+
         typedef size_t PatternID;
         inline static PatternID EOF_PATTERN_ID() { return 0; }
         inline static PatternID UNKNOWN_PATTERN_ID() { return 1; }
 
-        struct Match
-        {
-            std::string value;
-            Position position;
-        };
-
-        typedef void(*Procedure)(Stream&, const Match&);
-        typedef std::any(*Tokenizer)(Stream&, const Match&);
-        typedef std::variant<Procedure, Tokenizer, std::monostate> Action;
+        typedef void(*Procedure)(IStream<Unit>&, const Match&);
+        typedef std::any(*Function)(IStream<Unit>&, const Match&);
+        typedef std::variant<Procedure, Function, std::monostate> Action;
 
         struct Result
         {
@@ -130,54 +239,58 @@ namespace parser
         struct Pattern
         {
             PatternID id;
-            Regex regex;
+            PatternTemplate pTemplate;
             Action action;
         };
 
+        Matcher matcher;
         std::vector<Pattern> patterns;
         Pattern eof, unknown;
 
     public:
-        Lexer(Action _onEOF, Action _onUnknown) : patterns()
+        PatternMatcher(Matcher _matcher, Action _onEOF, Action _onUnknown) : matcher(_matcher), patterns()
         {
-            eof = { .id = EOF_PATTERN_ID(), .regex = Regex(), .action = _onEOF };
-            unknown = { .id = UNKNOWN_PATTERN_ID(), .regex = Regex(), .action = _onUnknown };
+            eof = { .id = EOF_PATTERN_ID(), .pTemplate = PatternTemplate(), .action = _onEOF };
+            unknown = { .id = UNKNOWN_PATTERN_ID(), .pTemplate = PatternTemplate(), .action = _onUnknown };
         }
 
-        PatternID AddPattern(Regex _regex, Action _action = std::monostate())
+        PatternID AddPattern(PatternTemplate _template, Action _action = std::monostate())
         {
-            patterns.push_back(Pattern{ .id = patterns.size() + 2, .regex = _regex, .action = _action });
+            patterns.push_back(Pattern{ .id = patterns.size() + 2, .pTemplate = _template, .action = _action });
             return patterns.back().id;
         }
 
-        Result Lex(Stream& _stream, bool _skipNonTokens = true)
+        Result GetMatch(IStream<Unit>& _stream)
         {
-            Pattern* matchingPattern = &unknown;
-            Match match{ .value = "", .position = _stream.GetPosition() };
+            Pattern* matchingPattern = nullptr;
+            Match match{ .start = _stream.offset, .size = 0 };
 
-            if (_stream.IsEOF())
-            {
-                match.value = std::string(1, (char)EOF);
-                matchingPattern = &eof;
-            }
+            if (_stream.IsEOF()) { matchingPattern = &eof; }
             else
             {
                 for (auto& pattern : patterns)
                 {
-                    std::smatch regexMatch;
-                    std::regex_search(_stream.Current(), _stream.End(), regexMatch, pattern.regex, std::regex_constants::match_continuous);
-
-                    if (regexMatch.size() == 0)
+                    auto matchLength = matcher(_stream, pattern.pTemplate); 
+                    if (!matchLength.has_value())
                         continue;
 
-                    match.value = regexMatch.str();
-                    _stream.Ignore(regexMatch.length()); //Advance stream past matched substring
-                    matchingPattern = &pattern;
+                    //If this is the first match or this match has a strictly greater length than
+                    //any previous match, set it as the match 
+                    if (!matchingPattern || matchLength > match.size)
+                    {
+                        match.size = matchLength;
+                        matchingPattern = &pattern;
+                    }
+                }
+
+                if (!matchingPattern)
+                {
+                    matchingPattern = &unknown;
+                    match.size = 1;
                 }
             }
 
-            if (matchingPattern == &unknown)
-                match.value = std::string(1, _stream.Get());
+            _stream.Ignore(match.size); //Advance stream past match
 
             Result result = {
                 .patternID = matchingPattern->id,
@@ -185,10 +298,26 @@ namespace parser
                 .match = match
             };
 
-            if (auto action = std::get_if<Tokenizer>(&matchingPattern->action)) { result.value = (*action)(_stream, match); }
-            else if (auto action = std::get_if<Procedure>(&matchingPattern->action)) { (*action)(_stream, match); }
+            if (auto action = std::get_if<Function>(&matchingPattern->action)) { result.value = (*action)(_stream, match); }
+            else if (auto action = std::get_if<Function>(&matchingPattern->action)) { (*action)(_stream, match); }
 
             return result;
         }
+    };
+
+    class Lexer : public PatternMatcher<char, Regex> 
+    {
+        static std::optional<size_t> Matcher(const IStream<char>& _stream, const Regex& _regex)
+        {
+            const char* current = &*_stream.CCurrent();
+            const char* end = &*_stream.CEnd();
+            std::cmatch regexMatch;
+            std::regex_search(current, end, regexMatch, _regex, std::regex_constants::match_continuous);
+
+            return regexMatch.size() == 0 ? std::optional<size_t>() : regexMatch.length();
+        }
+
+        public:
+        Lexer(Action _onEOF, Action _onUnknown) : PatternMatcher<char, Regex>(Matcher, _onEOF, _onUnknown) { }
     };
 }
