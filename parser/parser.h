@@ -42,16 +42,29 @@ namespace parser
     {
     protected:
         std::vector<T> data;
-        T eof;
 
     public:
         size_t offset;
 
-        IStream(std::vector<T>&& _data, T _eof) : data(std::move(_data)), eof(_eof), offset(0) { }
+        IStream(std::vector<T>&& _data) : data(std::move(_data)), offset(0)
+        {
+            assert(!data.empty() && "Data must be non-empty!");
+        }
 
-        T Peek() { return IsEOF() ? eof : data[offset]; }
-        T Get() { return IsEOF() ? eof : data[offset++]; }
+        IStream(std::vector<T>&& _data, T _eof) : data(std::move(_data)), offset(0)
+        {
+            data.push_back(_eof);
+        }
+
+        virtual T Peek() { return IsEOF() ? data.back() : data[offset]; }
         void Ignore(size_t _amt) { offset += _amt; }
+
+        T Get()
+        {
+            auto peek = Peek();
+            offset++;
+            return peek;
+        }
 
         typename std::vector<T>::iterator Begin() { return data.begin(); }
         typename std::vector<T>::iterator End() { return data.end(); }

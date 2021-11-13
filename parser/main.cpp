@@ -31,6 +31,24 @@ namespace parser
         };
 
         typedef Lexer::PatternID Terminal;
+
+        class TerminalStream : public IStream<Lexer::Result>
+        {
+            Lexer* lexer;
+            Stream* lexerStream;
+            Terminal eof;
+        public:
+            TerminalStream(Lexer* _lexer, Stream* _lexerStream, Terminal _eof) : IStream({ _lexer->GetMatch(*_lexerStream) }), lexer(_lexer), lexerStream(_lexerStream), eof(_eof) { }
+
+            Lexer::Result Peek() override
+            {
+                while (!data.back().patternID == eof && offset >= data.size() - 1)
+                    data.push_back(lexer->GetMatch(*lexerStream));
+
+                return IStream<Lexer::Result>::Peek();
+            }
+        };
+
         typedef std::vector<Rule> NonTerminal;
 
     private:
@@ -170,7 +188,7 @@ namespace parser
 
                 //None of the rules were parsable
                 _stream.offset = parseStart;
-                
+
                 //Throw error
                 std::stringstream errorSS;
                 errorSS << "Unable to parse '" << _symbolID << "'. Expected one of { ";
@@ -179,7 +197,7 @@ namespace parser
                 for (auto& expected : expecteds)
                     errorSS << *expected << ",";
 
-                if(!expecteds.empty())
+                if (!expecteds.empty())
                     errorSS.get(); //Remove trailing comma
 
                 errorSS << " }.";
