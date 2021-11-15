@@ -3,8 +3,7 @@
     ☐ add unicode support
 ☐ parser
     ☐ add tests
-    ☐ separteb lexer from parser
-    ☐ custom exceptions
+    ☐ change all std::runtime_error to ParserError
 ☐ unittest
     ☐ README
 
