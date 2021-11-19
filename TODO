@@ -3,7 +3,7 @@
     ☐ add unicode support
 ☐ parser
     ☐ add tests
-    ☐ change all std::runtime_error to ParserError
+    ☐ change all std::runtime_error to ParserError and note thst creation of parser errors are private
 ☐ unittest
     ☐ README
 

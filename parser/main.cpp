@@ -43,38 +43,38 @@ public:
 int main()
 {
     std::ifstream file("test.txt");
-    Stream input(file);
+    StringStream input(file);
 
-    auto eosAction = [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::END_OF_FILE(_match.position)); };
-    auto unknownAction = [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::INVALID(_match.value, _match.position)); };
+    auto eosAction = [](StringStream& _stream, const LexerMatch& _match) { return std::any(Token::END_OF_FILE(_match.position)); };
+    auto unknownAction = [](StringStream& _stream, const LexerMatch& _match) { return std::any(Token::INVALID(_match.value, _match.position)); };
 
     Parser parser(eosAction, unknownAction);
     parser.lexer.AddPattern(Regex("\\s"));
-    parser.lexer.AddPattern(Regex(":"), [](Stream& _stream, const LexerMatch& _match) { std::cout << "I spot a colon!" << std::endl; });
-    parser.AddTerminal("let", Regex("let"), [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::KW_LET(_match.position)); });
-    parser.AddTerminal("=", Regex("="), [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::SYM_EQ(_match.position)); });
-    parser.AddTerminal(";", Regex(";"), [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::SYM_SEMICOLON(_match.position)); });
-    parser.AddTerminal("ID", Regex("(_|[a-zA-Z])(_|[a-zA-Z0-9])*"), [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::ID(_match.value, _match.position)); });
-    parser.AddTerminal("NUM", Regex("-?(0|[1-9][0-9]*)([.][0-9]+)?"), [](Stream& _stream, const LexerMatch& _match) { return std::any(Token::NUM(std::stod(_match.value), _match.position)); });
+    parser.lexer.AddPattern(Regex(":"), [](StringStream& _stream, const LexerMatch& _match) { std::cout << "I spot a colon!" << std::endl; });
+    parser.AddTerminal("let", Regex("let"), [](StringStream& _stream, const LexerMatch& _match) { return std::any(Token::KW_LET(_match.position)); });
+    parser.AddTerminal("=", Regex("="), [](StringStream& _stream, const LexerMatch& _match) { return std::any(Token::SYM_EQ(_match.position)); });
+    parser.AddTerminal(";", Regex(";"), [](StringStream& _stream, const LexerMatch& _match) { return std::any(Token::SYM_SEMICOLON(_match.position)); });
+    parser.AddTerminal("ID", Regex("(_|[a-zA-Z])(_|[a-zA-Z0-9])*"), [](StringStream& _stream, const LexerMatch& _match) { return std::any(Token::ID(_match.value, _match.position)); });
+    parser.AddTerminal("NUM", Regex("-?(0|[1-9][0-9]*)([.][0-9]+)?"), [](StringStream& _stream, const LexerMatch& _match) { return std::any(Token::NUM(std::stod(_match.value), _match.position)); });
     parser.AddRule("DECL", { "let", "ID", "=", "EXPR", ";" }, [](TokenStream& _stream, const Parser::NTMatch& _match) { std::cout << "Found a declaration!" << std::endl; });
     parser.AddRule("DECL", { "let", "ID", "=", ";" }, [](TokenStream& _stream, const Parser::NTMatch& _match) { std::cout << "Found a declaration without expr!" << std::endl; });
     parser.AddRule("DECL", { "let", "ID", "=", Parser::SymbolID_AnyTerminal, ";" }, [](TokenStream& _stream, const Parser::NTMatch& _match)
         {
-            auto error = _match[3];
+            auto error = _match.GetValueFromArg(3);
             std::cout << error.GetPosition() << " Expected EXPR but found '" << error.GetMatchAsTerminal().value << "'" << std::endl;
         });
     parser.AddRule("DECL", { "let", "ID", "=", Parser::SymbolID_AnySymbol }, [](TokenStream& _stream, const Parser::NTMatch& _match)
         {
-            auto error = _match[3];
+            auto error = _match.GetValueFromArg(3);
             std::cout << error.GetPosition() << " Expected EXPR but found '" << error.GetID() << "'" << std::endl;
         });
     parser.AddRule("DECL", { "let", "ID", "=", Parser::SymbolID_AnyTerminal }, [](TokenStream& _stream, const Parser::NTMatch& _match)
         {
-            auto error = _match[3];
+            auto error = _match.GetValueFromArg(3);
             std::cout << error.GetPosition() << " Expected EXPR but found '" << error.GetMatchAsTerminal().value << "'" << std::endl;
         });
-    parser.AddRule("EXPR", { "NUM" }, [](TokenStream& _stream, const Parser::NTMatch& _match) { return _match[0].GetValue(); });
-    parser.AddRule("EXPR", { "ID" }, [](TokenStream& _stream, const Parser::NTMatch& _match) { return _match[0].GetValue(); });
+    parser.AddRule("EXPR", { "NUM" }, [](TokenStream& _stream, const Parser::NTMatch& _match) { return _match.GetValueFromArg(0).GetValue(); });
+    parser.AddRule("EXPR", { "ID" }, [](TokenStream& _stream, const Parser::NTMatch& _match) { return _match.GetValueFromArg(0).GetValue(); });
 
     try
     {

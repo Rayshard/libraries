@@ -10,13 +10,6 @@
 
 namespace parser
 {
-    namespace Error
-    {
-        std::runtime_error UnknownSymbol(const std::string& _name) { return std::runtime_error("Unknown symbol: " + _name); }
-        std::runtime_error DuplicateSymbolName(const std::string& _name) { return std::runtime_error("Duplicate symbol name: " + _name); }
-        std::runtime_error CannotParseSymbol(const std::string& _name) { return std::runtime_error("Unable to parse symbol: " + _name); }
-    }
-
     struct Position
     {
         size_t line, column;
@@ -39,7 +32,7 @@ namespace parser
     };
 
     template<typename T>
-    class IStream
+    class Stream
     {
     protected:
         std::vector<T> data;
@@ -47,21 +40,16 @@ namespace parser
     public:
         size_t offset;
 
-        IStream(std::vector<T>&& _data) : data(std::move(_data)), offset(0)
+        Stream(std::vector<T>&& _data) : data(std::move(_data)), offset(0)
         {
             assert(!data.empty() && "Data must be non-empty!");
         }
 
-        IStream(std::vector<T>&& _data, T _eos) : data(std::move(_data)), offset(0)
-        {
-            data.push_back(_eos);
-        }
-
         virtual T Peek() { return IsEOS() ? data.back() : data[offset]; }
-        
+
         void Ignore(size_t _amt)
         {
-            for(size_t i = 0; i < _amt; i++)
+            for (size_t i = 0; i < _amt; i++)
                 Get();
         }
 
@@ -83,12 +71,12 @@ namespace parser
         bool IsEOS() { return offset >= data.size(); }
     };
 
-    class Stream : public IStream<char>
+    class StringStream : public Stream<char>
     {
         std::vector<size_t> lineStarts;
 
     public:
-        Stream(std::string&& _data) : IStream(std::vector<char>(_data.begin(), _data.end()), (char)EOF)
+        StringStream(std::string&& _data) : Stream(std::vector<char>(_data.begin(), _data.end()))
         {
             //Get line starts
             lineStarts.push_back(0);
@@ -100,7 +88,7 @@ namespace parser
             }
         }
 
-        Stream(std::istream& _stream) : Stream(std::string((std::istreambuf_iterator<char>(_stream)), std::istreambuf_iterator<char>())) { }
+        StringStream(std::istream& _stream) : StringStream(std::string((std::istreambuf_iterator<char>(_stream)), std::istreambuf_iterator<char>())) { }
 
         std::string GetDataAsString(size_t _start, size_t _length) const
         {
@@ -147,7 +135,7 @@ namespace parser
     };
 
     template<typename Unit, class TStream, typename PatternTemplate, typename Match>
-        requires(std::is_base_of<IStream<Unit>, TStream>::value)
+        requires(std::is_base_of<Stream<Unit>, TStream>::value)
     class PatternMatcher
     {
     public:
@@ -155,9 +143,10 @@ namespace parser
         inline static constexpr PatternID EOS_PATTERN_ID() { return 0; }
         inline static constexpr PatternID UNKNOWN_PATTERN_ID() { return 1; }
 
+        typedef std::monostate NoAction;
         typedef void(*Procedure)(TStream&, const Match&);
         typedef std::any(*Function)(TStream&, const Match&);
-        typedef std::variant<Procedure, Function, std::monostate> Action;
+        typedef std::variant<Procedure, Function, NoAction> Action;
 
         struct Result
         {
@@ -187,7 +176,7 @@ namespace parser
             unknown = { .id = UNKNOWN_PATTERN_ID(), .pTemplate = PatternTemplate(), .action = _onUnknown };
         }
 
-        PatternID AddPattern(PatternTemplate _template, Action _action = std::monostate())
+        PatternID AddPattern(PatternTemplate _template, Action _action = NoAction())
         {
             patterns.push_back(Pattern{ .id = patterns.size() + 2, .pTemplate = _template, .action = _action });
             return patterns.back().id;
@@ -262,16 +251,16 @@ namespace parser
         std::string value;
     };
 
-    class Lexer : public PatternMatcher<char, Stream, Regex, LexerMatch>
+    class Lexer : public PatternMatcher<char, StringStream, Regex, LexerMatch>
     {
     public:
-        Lexer(Action _onEOS, Action _onUnknown) : PatternMatcher<char, Stream, Regex, LexerMatch>(_onEOS, _onUnknown) { }
+        Lexer(Action _onEOS, Action _onUnknown) : PatternMatcher<char, StringStream, Regex, LexerMatch>(_onEOS, _onUnknown) { }
 
     private:
-        LexerMatch MatchEOS(Stream& _stream) override { return LexerMatch{ .position = _stream.GetPosition(), .value = std::string(1, (char)EOF) }; }
-        LexerMatch MatchUnknown(Stream& _stream) override { return LexerMatch{ .position = _stream.GetPosition(), .value = std::string(1, _stream.Get()) }; }
+        LexerMatch MatchEOS(StringStream& _stream) override { return LexerMatch{ .position = _stream.GetPosition(), .value = std::string(1, (char)EOF) }; }
+        LexerMatch MatchUnknown(StringStream& _stream) override { return LexerMatch{ .position = _stream.GetPosition(), .value = std::string(1, _stream.Get()) }; }
 
-        std::optional<LexerMatch> MatchPatternTemplate(Stream& _stream, const Regex& _regex) override
+        std::optional<LexerMatch> MatchPatternTemplate(StringStream& _stream, const Regex& _regex) override
         {
             Position position = _stream.GetPosition();
             const char* current = &*_stream.CCurrent();
@@ -287,12 +276,12 @@ namespace parser
         }
     };
 
-    class TokenStream : public IStream<Lexer::Result>
+    class TokenStream : public Stream<Lexer::Result>
     {
         Lexer* lexer;
-        Stream* ss;
+        StringStream* ss;
     public:
-        TokenStream(Lexer* _lexer, Stream* _ss) : IStream({ _lexer->GetMatch(*_ss) }), lexer(_lexer), ss(_ss) { }
+        TokenStream(Lexer* _lexer, StringStream* _ss) : Stream({ _lexer->GetMatch(*_ss) }), lexer(_lexer), ss(_ss) { }
 
         Lexer::Result Peek() override
         {
@@ -301,7 +290,7 @@ namespace parser
             while (!data.back().IsEOS() && offset >= data.size() - 1)
                 data.push_back(lexer->GetMatch(*ss));
 
-            return IStream<Lexer::Result>::Peek();
+            return Stream<Lexer::Result>::Peek();
         }
 
         Position GetPosition() { return Peek().match.position; }
@@ -317,10 +306,37 @@ namespace parser
 
         struct Result;
 
+        struct Component
+        {
+            SymbolID id;
+            enum class Quantifier { ONE, ZERO_OR_ONE, ZERO_OR_MORE, ONE_OR_MORE } quantifier;
+
+            Component(const char* _id) : id(_id), quantifier(Quantifier::ONE) { }
+            Component(SymbolID _id) : id(_id), quantifier(Quantifier::ONE) { }
+            Component(SymbolID _id, Quantifier _q) : id(_id), quantifier(_q) { }
+
+            static Component ONE(SymbolID _id) { return Component(_id); }
+            static Component ZERO_OR_ONE(SymbolID _id) { return Component(_id, Quantifier::ZERO_OR_ONE); }
+            static Component ZERO_OR_MORE(SymbolID _id) { return Component(_id, Quantifier::ZERO_OR_MORE); }
+            static Component ONE_OR_MORE(SymbolID _id) { return Component(_id, Quantifier::ONE_OR_MORE); }
+        };
+
         typedef Lexer::PatternID Terminal;
-        typedef std::vector<SymbolID> Rule;
+        typedef std::vector<Component> Rule;
         typedef LexerMatch TerminalMatch;
-        typedef std::vector<Parser::Result> NTMatch;
+
+        struct NTMatch
+        {
+            typedef std::variant<Parser::Result, std::vector<Parser::Result>> Arg;
+            std::vector<Arg> args;
+            Position position;
+
+            NTMatch(Position _pos) : position(_pos), args() { }
+            NTMatch(Position _pos, std::initializer_list<Arg>&& _args) : position(_pos), args(std::move(_args)) { }
+
+            const Parser::Result& GetValueFromArg(size_t _idx) const { return std::get<const Parser::Result>(args[_idx]); }
+            const std::vector<Parser::Result>& GetValuesFromArg(size_t _idx) const { return std::get<const std::vector<Parser::Result>>(args[_idx]); }
+        };
 
         class Result
         {
@@ -355,37 +371,35 @@ namespace parser
         public:
             Parser* parser;
 
-            NonTerminal(Parser* _parser) : PatternMatcher<Lexer::Result, TokenStream, Rule, NTMatch>(std::monostate(), std::monostate()), parser(_parser) { }
+            NonTerminal(Parser* _parser) : PatternMatcher<Lexer::Result, TokenStream, Rule, NTMatch>(NoAction(), NoAction()), parser(_parser) { }
 
         private:
-            NTMatch MatchEOS(TokenStream& _stream) override { return { }; }
+            NTMatch MatchEOS(TokenStream& _stream) override { return NTMatch(_stream.GetPosition()); }
 
             NTMatch MatchUnknown(TokenStream& _stream) override
             {
                 auto token = _stream.Get();
-                return { Parser::Result(SymbolID_InvalidTerminal, token.match.position, std::move(token.value), Parser::Result::Match()) };
+                Position position = token.match.position;
+                return NTMatch(position, { Parser::Result(SymbolID_InvalidTerminal, position, std::move(token.value), Parser::Result::Match()) });
             }
 
             std::optional<NTMatch> MatchPatternTemplate(TokenStream& _stream, const Rule& _rule) override
             {
-                NTMatch match;
+                NTMatch match(_stream.GetPosition());
 
                 for (auto& component : _rule)
                 {
                     try
                     {
-                        auto arg = parser->ParseSymbol(_stream, component);
-
-                        if (component == SymbolID_AnyTerminal)
+                        switch (component.quantifier)
                         {
-                            auto innerResult = arg.GetMatchAsNonTerminal()[0];
-
-                            assert(innerResult.IsMatch<TerminalMatch>() && "Each rule inside of <TERMINAL> should match to a terminal!");
-                            arg = innerResult;
+                        case Component::Quantifier::ONE: {
+                            auto arg = parser->ParseSymbol(_stream, component.id);
+                            match.position = arg.GetPosition();
+                            match.args.push_back(arg);
+                        } break;
+                        default: assert(false && "Case not handled");
                         }
-                        else if (component == SymbolID_AnySymbol) { arg = arg.GetMatchAsNonTerminal()[0]; }
-
-                        match.push_back(arg);
                     }
                     catch (const std::runtime_error& e) { return std::optional<NTMatch>(); }
                 }
@@ -419,10 +433,10 @@ namespace parser
             if (auto terminal = std::get_if<Terminal>(&_symbol))
             {
                 terminals.emplace(*terminal, _id);
-                AddRule("<TERMINAL>", { _id });
+                AddRule(SymbolID_AnyTerminal, { _id });
             }
 
-            AddRule("<SYMBOL>", { _id });
+            AddRule(SymbolID_AnySymbol, { _id });
         }
 
         Result ParseTerminal(TokenStream& _stream, SymbolID _terminalSymbolID)
@@ -463,7 +477,7 @@ namespace parser
             {
             case NonTerminal::EOS_PATTERN_ID(): throw std::runtime_error("Unable to parse '" + _ntSymbolID + "'. Encountered end of stream!");
             case NonTerminal::UNKNOWN_PATTERN_ID(): throw std::runtime_error("Unable to parse '" + _ntSymbolID + "'. No rule matches the stream's tokens.");
-            default: return Result(_ntSymbolID, matchedRule.match.empty() ? streamStart : matchedRule.match[0].GetPosition(), std::move(matchedRule.value), matchedRule.match);
+            default: return Result(_ntSymbolID, matchedRule.match.args.empty() ? streamStart : matchedRule.match.position, std::move(matchedRule.value), matchedRule.match);
             }
         }
 
@@ -473,14 +487,32 @@ namespace parser
             if (symbolSearch == symbols.end())
                 throw std::runtime_error("Symbol with id '" + _symbolID + "' does not exist!");
 
-            return std::get_if<Terminal>(&symbolSearch->second) ? ParseTerminal(_stream, _symbolID) : ParseNonTerminal(_stream, _symbolID);
+            auto result = std::get_if<Terminal>(&symbolSearch->second) ? ParseTerminal(_stream, _symbolID) : ParseNonTerminal(_stream, _symbolID);
+
+            if (_symbolID == SymbolID_AnyTerminal)
+            {
+                auto innerResult = std::get_if<Parser::Result>(&result.GetMatchAsNonTerminal().args[0]);
+
+                assert(innerResult && "<TERMINAL> should parse to a single terminal!");
+                assert(innerResult->IsMatch<TerminalMatch>() && "<TERMINAL> should parse to a terminal!");
+                return *innerResult;
+            }
+            else if (_symbolID == SymbolID_AnySymbol)
+            {
+                auto innerResult = std::get_if<Parser::Result>(&result.GetMatchAsNonTerminal().args[0]);
+
+                assert(innerResult && "<SYMBOL> should parse to a single non-terminal!");
+                assert(innerResult->IsMatch<NTMatch>() && "<SYMBOL> should parse to a non-terminal!");
+                return *innerResult;
+            }
+            else { return result; }
         }
 
     public:
         void AddTerminal(SymbolID _id, Lexer::PatternID _patternID) { AddSymbol(_id, _patternID); }
-        void AddTerminal(SymbolID _id, Regex _regex, Lexer::Action _action = std::monostate()) { AddSymbol(_id, lexer.AddPattern(_regex, _action)); }
+        void AddTerminal(SymbolID _id, Regex _regex, Lexer::Action _action = NonTerminal::NoAction()) { AddSymbol(_id, lexer.AddPattern(_regex, _action)); }
 
-        void AddRule(SymbolID _ntID, std::initializer_list<SymbolID> _components, NonTerminal::Action _action = std::monostate())
+        void AddRule(SymbolID _ntID, std::initializer_list<Component> _components, NonTerminal::Action _action = NonTerminal::NoAction())
         {
             auto symbolSearch = symbols.find(_ntID);
             if (symbolSearch == symbols.end()) { AddSymbol(_ntID, NonTerminal(this)); }
@@ -500,9 +532,9 @@ namespace parser
                     {
                         for (auto& component : rule.pTemplate)
                         {
-                            auto symbolSearch = symbols.find(component);
+                            auto symbolSearch = symbols.find(component.id);
                             if (symbolSearch == symbols.end())
-                                throw std::runtime_error("Nonterminal '" + symbolID + "' references a symbol that does not exist: '" + component + "'");
+                                throw std::runtime_error("Nonterminal '" + symbolID + "' references a symbol that does not exist: '" + component.id + "'");
                         }
                     }
                 }
@@ -511,7 +543,7 @@ namespace parser
             validated = true;
         }
 
-        Result Parse(Stream& _stream, SymbolID _symbolID)
+        Result Parse(StringStream& _stream, SymbolID _symbolID)
         {
             if (!validated)
                 Validate();
