@@ -1,2 +1,2 @@
-# cpp-libraries
-Custom Libraries for C++
+# libraries
+Custom Libraries
