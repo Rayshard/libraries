@@ -1,9 +1,7 @@
 from abc import ABC, abstractmethod
-from enum import Enum, auto
 from io import StringIO
-from os import error
 import re
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Pattern, Tuple, Union
+from typing import Any, Callable, Dict, Generic, List, NamedTuple, Optional, Pattern, Tuple, TypeVar, Union, cast
 from dataclasses import dataclass
 
 @dataclass
@@ -137,7 +135,7 @@ class Lexer:
 
 class TokenStream:
     def __init__(self, lexer: Lexer, string: str, ignores: Optional[List[Lexer.PatternID]] = None) -> None:
-        self.lexer = lexer
+        self.__lexer = lexer
         self.__stream = StringStream(string)
         self.__offset : int = 0
         self.__tokens : List[Lexer.Token] = []
@@ -148,7 +146,7 @@ class TokenStream:
     def Get(self) -> Lexer.Token:
         while True:
             while len(self.__tokens) <= self.__offset and not self.IsEOS():
-                self.__tokens.append(self.lexer.Lex(self.__stream))
+                self.__tokens.append(self.__lexer.Lex(self.__stream))
 
             token = self.__tokens[self.__offset]
             self.__offset = len(self.__tokens) - 1 if self.IsEOS() else self.__offset + 1
@@ -328,67 +326,13 @@ class Lazy(Parser):
     def parse(self, stream: TokenStream) -> Parser.Result:
         return self.__thunk().parse(stream)
 
-if __name__ == "__main__":
-    def escape_str(string: str) -> str:
-        result = string
-        result = result.replace("\\n", "\n")
-        result = result.replace("\\t", "\t")
-        result = result.replace("\\r", "\r")
-        result = result.replace("\\f", "\f")
-        result = result.replace("\\b", "\b")
-        result = result.replace("\\\"", "\"")
-        result = result.replace("\\\\", "\\")
-        return result
+T = TypeVar('T')
+class LPC(Generic[T]):
+    def __init__(self, lexer: Lexer, parser: Parser, ignores: Optional[List[Lexer.PatternID]] = None) -> None:
+        self.__lexer = lexer
+        self.__parser = parser
+        self.__ignores = ignores if ignores is not None else []
 
-    lexer = Lexer()
-    lexer.AddPattern("\\s+", None, "WS")
-    lexer.AddPattern("{|}|\\[|\\]|,|:", None, "SYMBOL")
-    lexer.AddPattern("(true)|(false)|(null)", None, "KEYWORD")
-    lexer.AddPattern("-?(?:0|[1-9]\d*)(?:\.\d+)(?:[eE][+-]?\d+)?", None, "decimal")
-    lexer.AddPattern("-?(?:0|[1-9]\d*)", None, "integer")
-    lexer.AddPattern("\"([^\\\"\\\\]|\\\\.)*\"", lambda _, value: escape_str(value[1:-1]), "string")
-
-    parsers : Dict[str, Parser] = {}
-    parsers["string"] = Terminal("string", "string")
-    parsers["value"] = Choice("Value", [
-        parsers["string"],
-        Terminal("number", "integer", transformer=lambda value: int(value)),
-        Terminal("number", "decimal", transformer=lambda value: float(value)),
-        Terminal("true", "KEYWORD", "true", transformer=lambda _: True),
-        Terminal("false", "KEYWORD", "false", transformer=lambda _: False),
-        Terminal("null", "KEYWORD", "null", transformer=lambda _: None),
-        Lazy("object", lambda: parsers["object"]),
-        Lazy("array", lambda: parsers["array"]),
-    ], tag=True)
-    parsers["pair"] = Sequence("pair", [parsers["string"], Terminal(":", "SYMBOL", ":"), parsers["value"]])
-    parsers["object"] = Sequence("object", [
-        Terminal("{", "SYMBOL", "{"),
-        Separated("pairs", parsers["pair"], Terminal(",", "SYMBOL", ",")),
-        Terminal("}", "SYMBOL", "}"),
-    ], transformer=lambda value: {res.value[0].value:res.value[2].value[1] for res in value[1].value})
-    parsers["array"] = Sequence("array", [
-        Terminal("[", "SYMBOL", "["),
-        Separated("values", parsers["value"], Terminal(",", "SYMBOL", ",")),
-        Terminal("]", "SYMBOL", "]"),
-    ], transformer=lambda value: [res.value[1] for res in value[1].value])
-    parsers["json"] = Choice("json", [parsers["array"], parsers["object"]], tag=False)
-
-    import json
-    
-    test = {
-        "string": "Hello, \"\\\b\n\f\r\t\u0394World!",
-        "number": 123.0,
-        "true": True,
-        "false": False,
-        "null": None,
-        "array": [1, "a", True, False, None]
-    }
-    test_str = json.dumps(test, indent=4, sort_keys=False, ensure_ascii=False)
-    stream = TokenStream(lexer, test_str, ["WS"])
-
-    try:
-        parse_result = parsers["json"].parse(stream)
-        assert test == parse_result.value
-    except Parser.Error as e:
-        print(e)
-
+    def parse(self, text: str) -> T:
+        stream = TokenStream(self.__lexer, text, self.__ignores)
+        return cast(T, self.__parser.parse(stream).value)
