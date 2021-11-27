@@ -17,19 +17,23 @@ int main()
     lexer.AddPattern("ID", Regex("(_|[a-zA-Z])(_|[a-zA-Z0-9])*"));
     lexer.AddPattern("NUMBER", Regex("-?(0|[1-9][0-9]*)([.][0-9]+)?"));
 
-    auto s = Sequence("Hi", {
+    auto expr = Choice("EXPR", Terminal("ID", "ID"));
+    //auto expr = Choice1("EXPR", std::vector<std::variant<Parser<std::string>>>({std::variant<Parser<std::string>>(Terminal("ID", "ID"))}));
+
+    auto s = Sequence("Hi",
         Terminal("LET", "KEYWORD", "let"),
         Terminal("ID", "ID"),
         Terminal("EQ", "SYMBOL", "="),
-        Terminal("EXPR", "NUMBER"),
-        Terminal("SEMICOLON", "SYMBOL", "=")
-        });
+        expr,
+        Terminal("SEMICOLON", "SYMBOL", ";")
+    );
 
     try
     {
         auto r = s.Parse(IStreamToString(file), lexer, { "WS" });
+        std::cout << 5 << std::endl;
     }
-    catch(const ParseError& e)
+    catch (const ParseError& e)
     {
         std::cerr << e.what() << std::endl;
     }

@@ -10,6 +10,7 @@
 #include <functional>
 #include <sstream>
 #include <tuple>
+#include <iostream> //TODO: remove
 
 namespace lpc
 {
@@ -146,24 +147,21 @@ namespace lpc
         }
     };
 
+    template<typename T>
     class Parser
     {
     public:
         struct Result
         {
             Position position;
-            std::any value;
+            T value;
 
-            template<typename T>
             std::string ToString() const
             {
                 std::stringstream ss;
-                ss << "Result { position = " << position << ", value = \"" << GetValue<T>() << "\" }";
+                ss << "Result { position = " << position << ", value = \"" << value << "\" }";
                 return ss.str();
             }
-
-            template<typename T>
-            const T& GetValue() const { return std::any_cast<const T&>(value); }
         };
 
         typedef std::function<Result(const Position& _pos, TokenStream& _stream)> Function;
@@ -175,10 +173,7 @@ namespace lpc
     public:
         Parser(const std::string& _name, Function _func) : name(_name), function(_func) { }
 
-        Result Parse(TokenStream& _stream)
-        {
-            return function(_stream.GetPosition(), _stream);
-        }
+        Result Parse(TokenStream& _stream) { return function(_stream.GetPosition(), _stream); }
 
         Result Parse(const std::string& _input, Lexer& _lexer, const std::set<Lexer::PatternID>& _ignores = {})
         {
@@ -190,9 +185,12 @@ namespace lpc
         const std::string& GetName() const { return name; }
     };
 
-    static Parser Terminal(const std::string& _name, const Lexer::PatternID& _patternID, std::optional<std::string> _value = std::nullopt)
+    template<typename T>
+    using ParseResult = typename Parser<T>::Result;
+
+    static Parser<std::string> Terminal(const std::string& _name, const Lexer::PatternID& _patternID, std::optional<std::string> _value = std::nullopt)
     {
-        return Parser(_name, [_patternID, _value](const Position& _pos, TokenStream& _stream)
+        return Parser<std::string>(_name, [&](const Position& _pos, TokenStream& _stream)
             {
                 auto token = _stream.Get();
 
@@ -205,33 +203,83 @@ namespace lpc
                 else if (_value.has_value() && token.value != _value.value())
                     throw ParseError::Expectation("'" + _value.value() + "'", "'" + token.value + "'", token.position);
 
-                return Parser::Result{ .position = _pos, .value = std::any(token.value) };
+                return ParseResult<std::string>{.position = _pos, .value = token.value };
             });
     }
 
-    static Parser Sequence(const std::string& _name, std::vector<Parser> _parsers)
+    template<typename... Args>
+    static Parser<std::tuple<ParseResult<Args>...>> Sequence(const std::string& _name, Parser<Args>... _parsers)
     {
-        return Parser(_name, [_parsers](const Position& _pos, TokenStream& _stream)
+        using ParserT = Parser<std::tuple<ParseResult<Args>...>>;
+        return ParserT(_name, [&](const Position& _pos, TokenStream& _stream)
             {
-                std::vector<Parser::Result> result;
-
-                for (auto parser : _parsers)
-                    result.push_back(parser.Parse(_stream));
-
-                return typename Parser::Result{ .position = _pos, .value = std::any(result) };
+                return typename ParserT::Result{ .position = _pos, .value = { _parsers.Parse(_stream)... } };
             });
     }
 
-    class LPC
+    template<typename... Ts>
+    struct Choices
     {
-        Lexer lexer;
-        Parser parser;
-        std::set<Lexer::PatternID> ignores;
+        typedef std::tuple<Ts...> Type;
+        typedef std::vector<std::variant<Ts...>> Container;
+        static constexpr size_t Size = std::tuple_size_v<Type> -1;
 
-    public:
-        LPC(Lexer _lexer, Parser _parser, const std::set<Lexer::PatternID>& _ignores = {})
-            : lexer(_lexer), parser(_parser), ignores(_ignores) { }
+        template <size_t N>
+        static void insert(Type& _t, Container& _container)
+        {
+            _container.emplace_back(std::get<N>(_t));
+            insert<N - 1>(_t, _container);
+        }
 
-        typename Parser::Result Parse(const std::string& _input) { return parser.Parse(_input, lexer, ignores); };
+        template <>
+        static void insert<0>(Type& _t, Container& _container)
+        {
+            try
+            {Lexer lexer;
+            auto x = std::get<0>(_t).Parse("", lexer);
+            }
+            catch(...)
+            {
+                
+            }
+            _container.emplace_back(std::get<0>(_t));
+        }
+
+        static void insert(Type& _t, Container& _container)
+        {
+            insert<Size>(_t, _container);
+        }
     };
+
+    template<typename... Args>
+    static Parser<std::variant<ParseResult<Args>...>> Choice(const std::string& _name, Parser<Args>... _parsers)
+    {
+        using Arg = std::variant<ParseResult<Args>...>;
+        return Parser<Arg>(_name, [&](const Position& _pos, TokenStream& _stream)
+            {
+                Arg arg;
+                size_t streamStart = _stream.GetOffset(), greatestArgLength = 0;
+
+                using K = Choices<Parser<Args>...>;
+                typename Choices<Parser<Args>...>::Container choices;
+                auto parsers = std::make_tuple(_parsers...);
+                K::insert(parsers, choices);
+                std::cout << choices.size() << std::endl;
+
+                return typename Parser<Arg>::Result{ .position = _pos, .value = Arg() };
+            });
+    }
+
+    // class LPC
+    // {
+    //     Lexer lexer;
+    //     Parser parser;
+    //     std::set<Lexer::PatternID> ignores;
+
+    // public:
+    //     LPC(Lexer _lexer, Parser _parser, const std::set<Lexer::PatternID>& _ignores = {})
+    //         : lexer(_lexer), parser(_parser), ignores(_ignores) { }
+
+    //     typename Parser::Result Parse(const std::string& _input) { return parser.Parse(_input, lexer, ignores); };
+    // };
 }
