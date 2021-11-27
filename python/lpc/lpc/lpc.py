@@ -82,9 +82,6 @@ class Lexer:
     Pattern = NamedTuple('Pattern', [('id', PatternID), ('regex', re.Pattern), ('action', Action)])
     Token = NamedTuple('Token', [('patternID', PatternID), ('position', Position), ('value', str)])
     
-    def CreatePatternIDFromIdx(idx: int) -> PatternID:
-        return f"<Pattern: {idx}>"
-
     EOS_PATTERN_ID = "<EOS>"
     UNKNOWN_PATTERN_ID = "<UNKNOWN>"
 
@@ -93,9 +90,12 @@ class Lexer:
         self.__patternUnknown = Lexer.Pattern(Lexer.UNKNOWN_PATTERN_ID, re.compile(""), onUnknown)
         self.__patterns : List[Lexer.Pattern] = []
 
+    def GetPatternIDs(self) -> List[PatternID]:
+        return [pattern.id for pattern in self.__patterns] + [Lexer.EOS_PATTERN_ID(), Lexer.UNKNOWN_PATTERN_ID()]
+
     def AddPattern(self, regex: str, action: Action = None, id: Optional[PatternID] = None) -> PatternID:
-        patternID = Lexer.CreatePatternIDFromIdx(len(self.__patterns)) if id is None else id
-        assert patternID not in [pattern.id for pattern in self.__patterns], f"Pattern with id '{patternID}' already exists!"
+        patternID = f"<Pattern: {len(self.__patterns)}>" if id is None else id
+        assert patternID not in self.GetPatternIDs(), f"Pattern with id '{patternID}' already exists!"
 
         self.__patterns.append(Lexer.Pattern(patternID, re.compile(f"^({regex})"), action))
         return self.__patterns[-1].id
@@ -169,7 +169,7 @@ class TokenStream:
         self.__offset = max(0, min(offset, len(self.__tokens) - 1))
 
     def IsEOS(self) -> bool:
-        return len(self.__tokens) != 0 and self.__tokens[-1].patternID == Lexer.EOS_PATTERN_ID
+        return len(self.__tokens) != 0 and self.__tokens[self.__offset].patternID == Lexer.EOS_PATTERN_ID
 
     def GetPosition(self) -> Position:
         return self.Peek().position

@@ -2,7 +2,7 @@
 name = "build-system"
 version = "0.1.0"
 description = ""
-authors = ["Rayshard Thompson <rayshard.thompson@kensho.com>"]
+authors = ["Rayshard Thompson <rayshard.t123@gmail.com>"]
 
 [tool.poetry.scripts]
 build = 'build_system.build:build'
