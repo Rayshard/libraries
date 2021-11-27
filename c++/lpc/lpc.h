@@ -220,34 +220,49 @@ namespace lpc
     template<typename... Ts>
     struct Choices
     {
-        typedef std::tuple<Ts...> Type;
-        typedef std::vector<std::variant<Ts...>> Container;
-        static constexpr size_t Size = std::tuple_size_v<Type> -1;
+        typedef std::tuple<Parser<Ts>...> Parsers;
+        typedef std::variant<Ts...> Result;
+        typedef std::vector<Result> Results;
+        static constexpr size_t Size = std::tuple_size_v<Parsers>;
 
         template <size_t N>
-        static void insert(Type& _t, Container& _container)
+        static void insert(Parsers& _parsers, Results& _results, TokenStream& _stream)
         {
-            _container.emplace_back(std::get<N>(_t));
-            insert<N - 1>(_t, _container);
+            try
+            {
+                size_t streamStart = _stream.GetOffset();
+                //_results.emplace_back(std::get<N>(_parsers).Parse(_stream));
+                _stream.SetOffset(streamStart);
+            }
+            catch(const ParseError& e)
+            {
+                _results.emplace_back(Result());
+            }
+            
+            
+            insert<N - 1>(_results, _results);
         }
 
         template <>
-        static void insert<0>(Type& _t, Container& _container)
+        static void insert<0>(Parsers& _parsers, Results& _results, TokenStream& _stream)
         {
             try
-            {Lexer lexer;
-            auto x = std::get<0>(_t).Parse("", lexer);
-            }
-            catch(...)
             {
-                
+                size_t streamStart = _stream.GetOffset();
+                //_results.emplace_back(std::get<0>(_parsers).Parse(_stream));
+                _stream.SetOffset(streamStart);
             }
-            _container.emplace_back(std::get<0>(_t));
+            catch(const ParseError& e)
+            {
+                _results.emplace_back(Result());
+            }
         }
 
-        static void insert(Type& _t, Container& _container)
+        static Results insert(Parsers& _parsers, TokenStream& _stream)
         {
-            insert<Size>(_t, _container);
+            Results results;
+            insert<Size - 1>(_parsers, results, _stream);
+            return results;
         }
     };
 
@@ -260,10 +275,11 @@ namespace lpc
                 Arg arg;
                 size_t streamStart = _stream.GetOffset(), greatestArgLength = 0;
 
-                using K = Choices<Parser<Args>...>;
-                typename Choices<Parser<Args>...>::Container choices;
+                using TChoices = Choices<Args...>;
                 auto parsers = std::make_tuple(_parsers...);
-                K::insert(parsers, choices);
+                auto choices = TChoices::insert(parsers, _stream);
+                // typename Choices<Parser<Args>...>::Container choices;
+                // K::insert(parsers, choices);
                 std::cout << choices.size() << std::endl;
 
                 return typename Parser<Arg>::Result{ .position = _pos, .value = Arg() };
