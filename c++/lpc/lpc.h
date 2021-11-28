@@ -141,6 +141,12 @@ namespace lpc
         ParseError(Position _pos, const std::string& _msg)
             : std::runtime_error("Error @ " + _pos.ToString() + ": " + _msg) { }
 
+        ParseError(Position _pos, const std::string& _msg, const ParseError& _appendage)
+            : ParseError(_pos, _msg + "\n" + _appendage.what()) { }
+
+        ParseError(const ParseError& _e1, const ParseError& _e2)
+            : std::runtime_error(_e1.what() + std::string("\n") + _e2.what()) { }
+
         static ParseError Expectation(const std::string& _expected, const std::string& _found, const Position& _pos)
         {
             return ParseError(_pos, "Expected " + _expected + ", but found " + _found);
@@ -173,14 +179,34 @@ namespace lpc
     public:
         Parser(const std::string& _name, Function _func) : name(_name), function(_func) { }
 
-        Result Parse(TokenStream& _stream) { return function(_stream.GetPosition(), _stream); }
+        Parser() : Parser("", [](const Position& _pos, TokenStream& _stream) { return Result{ .position = _pos, .value = T() }; }) { }
 
-        Result Parse(const std::string& _input, Lexer& _lexer, const std::set<Lexer::PatternID>& _ignores = {})
+        Parser(const std::string& _name, Parser<T> _parser) : Parser(_name, [=](const Position& _pos, TokenStream& _stream) { return _parser.Parse(_stream); }) { }
+
+        Result Parse(TokenStream& _stream) const
+        {
+            auto streamStart = _stream.GetOffset();
+
+            try { return function(_stream.GetPosition(), _stream); }
+            catch(const ParseError& e)
+            {
+                _stream.SetOffset(streamStart);
+                throw ParseError(_stream.GetPosition(), "Unable to parse " + name, e);
+            }
+        }
+
+        Result Parse(const std::string& _input, Lexer& _lexer, const std::set<Lexer::PatternID>& _ignores = {}) const
         {
             StringStream ss(_input);
             TokenStream stream(&_lexer, &ss, _ignores);
             return Parse(stream);
         };
+
+        template<typename M>
+        using Mapper = std::function<typename Parser<M>::Result(const Result&)>;
+
+        template<typename M>
+        Parser<M> Map(Mapper<M> _func) { return Parser<M>(name, [=, function = function](const Position& _pos, TokenStream& _stream) { return _func(function(_pos, _stream)); }); }
 
         const std::string& GetName() const { return name; }
     };
@@ -190,7 +216,7 @@ namespace lpc
 
     static Parser<std::string> Terminal(const std::string& _name, const Lexer::PatternID& _patternID, std::optional<std::string> _value = std::nullopt)
     {
-        return Parser<std::string>(_name, [&](const Position& _pos, TokenStream& _stream)
+        return Parser<std::string>(_name, [=](const Position& _pos, TokenStream& _stream)
             {
                 auto token = _stream.Get();
 
@@ -217,72 +243,96 @@ namespace lpc
             });
     }
 
+    template<typename T>
+    static Parser<T> Choice(const std::string& _name, std::initializer_list<Parser<T>> _parsers)
+    {
+        return Parser<T>(_name, [parsers = std::vector(_parsers)](const Position& _pos, TokenStream& _stream)
+        {
+            size_t streamStart = _stream.GetOffset(), greatestLength = 0;
+            std::optional<ParseResult<T>> result;
+
+            for (auto parser : parsers)
+            {
+                try
+                {
+                    auto parseResult = parser.Parse(_stream);
+                    auto length = _stream.GetOffset() - streamStart;
+
+                    if (length > greatestLength)
+                        result = parseResult;
+                }
+                catch (const ParseError& e) {}
+
+                _stream.SetOffset(streamStart);
+            }
+
+            return result.has_value() ? result.value() : ParseResult<T>{ .position = _pos, .value = T() };
+        });
+    }
+
     template<typename... Ts>
-    struct Choices
+    using VariantResultValue = std::variant<Ts...>;
+
+    template<typename... Ts>
+    using VariantResult = ParseResult<VariantResultValue<Ts...>>;
+
+    template<typename... Ts>
+    struct VariantParsers : public std::array<Parser<std::variant<Ts...>>, sizeof...(Ts)>
     {
         typedef std::tuple<Parser<Ts>...> Parsers;
-        typedef std::variant<Ts...> Result;
-        typedef std::vector<Result> Results;
-        static constexpr size_t Size = std::tuple_size_v<Parsers>;
+        typedef VariantResultValue<Ts...> Value;
 
-        template <size_t N>
-        static void insert(Parsers& _parsers, Results& _results, TokenStream& _stream)
+        VariantParsers(Parser<Ts>... _parsers)
         {
-            try
-            {
-                size_t streamStart = _stream.GetOffset();
-                //_results.emplace_back(std::get<N>(_parsers).Parse(_stream));
-                _stream.SetOffset(streamStart);
-            }
-            catch(const ParseError& e)
-            {
-                _results.emplace_back(Result());
-            }
-            
-            
-            insert<N - 1>(_results, _results);
+            auto parsers = std::make_tuple(_parsers...);
+            Populate<sizeof...(Ts) - 1>(parsers);
         }
 
-        template <>
-        static void insert<0>(Parsers& _parsers, Results& _results, TokenStream& _stream)
+    private:
+        template <size_t Idx>
+        void Populate(Parsers& _parsers)
         {
-            try
-            {
-                size_t streamStart = _stream.GetOffset();
-                //_results.emplace_back(std::get<0>(_parsers).Parse(_stream));
-                _stream.SetOffset(streamStart);
-            }
-            catch(const ParseError& e)
-            {
-                _results.emplace_back(Result());
-            }
-        }
+            if constexpr (Idx != 0)
+                Populate<Idx - 1>(_parsers);
 
-        static Results insert(Parsers& _parsers, TokenStream& _stream)
-        {
-            Results results;
-            insert<Size - 1>(_parsers, results, _stream);
-            return results;
+            using ParserType = std::tuple_element_t<Idx, Parsers>;
+            using ArgType = std::variant_alternative_t<Idx, Value>;
+
+            this->operator[](Idx) = std::get<Idx>(_parsers).template Map<Value>([](const ParseResult<std::string>& _value)
+                {
+                    return ParseResult<Value>{.position = _value.position, .value = Value(std::in_place_index<Idx>, _value.value) };
+                });
         }
     };
 
-    template<typename... Args>
-    static Parser<std::variant<ParseResult<Args>...>> Choice(const std::string& _name, Parser<Args>... _parsers)
+    template<typename... Ts>
+    static Parser<VariantResultValue<Ts...>> Variant(const std::string& _name, Parser<Ts>... _parsers)
     {
-        using Arg = std::variant<ParseResult<Args>...>;
-        return Parser<Arg>(_name, [&](const Position& _pos, TokenStream& _stream)
+        return Parser<VariantResultValue<Ts...>>(_name, [=](const Position& _pos, TokenStream& _stream)
             {
-                Arg arg;
-                size_t streamStart = _stream.GetOffset(), greatestArgLength = 0;
+                auto parsers = VariantParsers<Ts...>(_parsers...);
+                size_t streamStart = _stream.GetOffset(), greatestLength = 0;
+                std::optional<VariantResult<Ts...>> result;
 
-                using TChoices = Choices<Args...>;
-                auto parsers = std::make_tuple(_parsers...);
-                auto choices = TChoices::insert(parsers, _stream);
-                // typename Choices<Parser<Args>...>::Container choices;
-                // K::insert(parsers, choices);
-                std::cout << choices.size() << std::endl;
+                for (auto parser : parsers)
+                {
+                    try
+                    {
+                        auto parseResult = parser.Parse(_stream);
+                        auto length = _stream.GetOffset() - streamStart;
 
-                return typename Parser<Arg>::Result{ .position = _pos, .value = Arg() };
+                        if (length > greatestLength)
+                        {
+                            result = parseResult;
+                            greatestLength = length;
+                        }
+                    }
+                    catch (const ParseError& e) {}
+
+                    _stream.SetOffset(streamStart);
+                }
+
+                return result.has_value() ? result.value() : VariantResult<Ts...>{ .position = _pos, .value = VariantResultValue<Ts...>() };
             });
     }
 

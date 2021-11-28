@@ -17,20 +17,41 @@ int main()
     lexer.AddPattern("ID", Regex("(_|[a-zA-Z])(_|[a-zA-Z0-9])*"));
     lexer.AddPattern("NUMBER", Regex("-?(0|[1-9][0-9]*)([.][0-9]+)?"));
 
-    auto expr = Choice("EXPR", Terminal("ID", "ID"));
-    //auto expr = Choice1("EXPR", std::vector<std::variant<Parser<std::string>>>({std::variant<Parser<std::string>>(Terminal("ID", "ID"))}));
+   auto mapper = [=](const ParseResult<std::string>& _value)
+    {
+        std::cout << _value.value << std::endl;
+        return ParseResult<std::string>{_value.position, "Hello"};
+    };
+    
+    //auto expr = Choice("EXPR", { Terminal("ID", "ID"), Terminal("NUMBER", "NUMBER") }).Map<std::string>(mapper);
+    //auto expr = Choice("EXPR", { Terminal("ID", "ID"), Terminal("NUMBER", "NUMBER") });
+    //auto expr = Terminal("NUMBER", "NUMBER");
+    //auto expr = Map<std::string, std::string>(Choice("EXPR", { Terminal("ID", "ID"), Terminal("NUMBER", "NUMBER") }), mapper);
+    auto expr = Variant("EXPR", Terminal("ID", "ID"), Terminal("NUMBER", "NUMBER"));
+    
+    // auto s = Sequence("Hi",
+    //     Terminal("LET", "KEYWORD", "let"),
+    //     Terminal("ID", "ID"),
+    //     Terminal("EQ", "SYMBOL", "="),
+    //     expr,
+    //     Terminal("SEMICOLON", "SYMBOL", ";")
+    // );
 
-    auto s = Sequence("Hi",
-        Terminal("LET", "KEYWORD", "let"),
-        Terminal("ID", "ID"),
-        Terminal("EQ", "SYMBOL", "="),
-        expr,
-        Terminal("SEMICOLON", "SYMBOL", ";")
-    );
+    auto s = Parser("MyParser", Terminal("ID", "ID"));
+    // >> Sequence("Hi",
+    //     Terminal("LET", "KEYWORD", "let"),
+    //     Terminal("ID", "ID"),
+    //     Terminal("EQ", "SYMBOL", "="),
+    //     expr,
+    //     Terminal("SEMICOLON", "SYMBOL", ";")
+    // );
 
     try
     {
-        auto r = s.Parse(IStreamToString(file), lexer, { "WS" });
+        auto r = s.Parse(IStreamToString(file), lexer, { "WS" }).value;
+        //auto r = expr.Parse(IStreamToString(file), lexer, { "WS" }).value;
+        //std::cout << std::get<1>(r) << std::endl;
+        std::cout << r << std::endl;
         std::cout << 5 << std::endl;
     }
     catch (const ParseError& e)
