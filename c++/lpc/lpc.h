@@ -10,7 +10,7 @@
 #include <functional>
 #include <sstream>
 #include <tuple>
-#include <iostream> //TODO: remove
+#include <unordered_map>
 
 namespace lpc
 {
@@ -79,6 +79,9 @@ namespace lpc
         std::string GetDataAsString(size_t _start, size_t _length) const;
     };
 
+    template<typename T>
+    class Parser;
+
     class Lexer
     {
     public:
@@ -101,26 +104,29 @@ namespace lpc
             bool IsUnknown() const;
         };
 
-    private:
         struct Pattern
         {
             PatternID id;
             Regex regex;
             Action action;
+
+            Parser<std::string> AsTerminal(std::optional<std::string> _value = std::nullopt) const;
         };
 
+    private:
         std::vector<Pattern> patterns;
+        std::unordered_map<PatternID, Pattern*> patternsMap;
         Pattern patternEOS, patternUnknown;
 
     public:
         Lexer(Action _onEOS = std::monostate(), Action _onUnknown = std::monostate());
 
-        PatternID AddPattern(PatternID _id, Regex _regex, Action _action = NoAction());
-        PatternID AddPattern(Regex _regex, Action _action = NoAction());
-        Token Lex(StringStream& _stream);
+        const Pattern& AddPattern(PatternID _id, Regex _regex, Action _action = NoAction());
+        const Pattern& AddPattern(Regex _regex, Action _action = NoAction());
+        Token Lex(StringStream& _stream) const;
 
-    private:
-        bool HasPatternID(const PatternID& _id);
+        const Pattern& GetPattern(const PatternID& _id) const;
+        bool HasPattern(const PatternID& _id) const;
     };
 
     class TokenStream : public Stream<Lexer::Token>
@@ -155,9 +161,6 @@ namespace lpc
             return ParseError(_pos, "Expected " + _expected + ", but found " + _found);
         }
     };
-
-    template<typename T>
-    class Parser;
 
     template<typename T>
     struct ParserOperation
@@ -224,16 +227,30 @@ namespace lpc
         };
 
         template<typename M>
-        using Mapper = std::function<typename Parser<M>::Result(const Result&)>;
+        using Mapper = std::function<M(const Result&)>;
 
         template<typename M>
-        Parser<M> Map(Mapper<M> _func) const { return Parser<M>(name, [=, function = function](const Position& _pos, TokenStream& _stream) { return _func(function(_pos, _stream)); }); }
+        Parser<M> Map(Mapper<M> _func) const { return Parser<M>(name, [=, function = function](const Position& _pos, TokenStream& _stream) { return typename Parser<M>::Result{ .position = _pos, .value = _func(function(_pos, _stream)) }; }); }
 
         const std::string& GetName() const { return name; }
     };
 
     template<typename T>
     using ParseResult = typename Parser<T>::Result;
+
+    template<typename T>
+    class Recursive : public Parser<T>
+    {
+        std::shared_ptr<Parser<T>> parser;
+
+    public:
+        Recursive(const std::string& _name) : Parser<T>(_name, [=](const Position& _pos, TokenStream& _stream) { return parser->Parse(_stream); }) {}
+
+        void Set(const Parser<T>& _parser) { parser.reset(new Parser<T>(_parser)); }
+    };
+
+    template<typename T>
+    using Empty = Parser<T>;
 
     static Parser<std::string> Terminal(const std::string& _name, const Lexer::PatternID& _patternID, std::optional<std::string> _value = std::nullopt)
     {
@@ -310,9 +327,18 @@ namespace lpc
     List<Head..., Appendage> operator&(const List<Head...>& _head, const Parser<Appendage>& _appendage)
     {
         auto list = List<Head..., Appendage>(_head.name, std::tuple_cat(_head.parsers, std::make_tuple(_appendage)));
-        list.name.replace(_head.name.size() - 1, 1, " & " + _appendage.GetName() + ")");
+        list.name.replace(list.name.size() - 1, 1, " & " + _appendage.GetName() + ")");
         return list;
     }
+
+    template<typename First, typename Second>
+    List<First, Second> operator&(const ParserOperation<First>& _first, const Parser<Second>& _second) { return Parser(_first) & _second; }
+
+    template<typename First, typename Second>
+    List<First, Second> operator&(const Parser<First>& _first, const ParserOperation<Second>& _second) { return _first & Parser(_second); }
+
+    template<typename First, typename Second>
+    List<First, Second> operator&(const ParserOperation<First>& _first, const ParserOperation<Second>& _second) { return Parser(_first) & Parser(_second); }
 
     template<typename T>
     struct Choice : public ParserOperation<T>
@@ -387,48 +413,22 @@ namespace lpc
         return choice;
     }
 
-    template<typename... Ts>
-    using VariantResultValue = std::variant<Ts...>;
+    template<typename T>
+    Choice<T> operator|(const ParserOperation<T>& _option1, const Parser<T>& _option2) { return Parser(_option1) | _option2; }
 
-    template<typename... Ts>
-    using VariantResult = ParseResult<VariantResultValue<Ts...>>;
+    template<typename T>
+    Choice<T> operator|(const Parser<T>& _option1, const ParserOperation<T>& _option2) { return _option1 | Parser(_option2); }
 
-    template<typename... Ts>
-    struct VariantParsers : public std::array<Parser<std::variant<Ts...>>, sizeof...(Ts)>
-    {
-        typedef std::tuple<Parser<Ts>...> Parsers;
-        typedef VariantResultValue<Ts...> Value;
-
-        VariantParsers(Parser<Ts>... _parsers)
-        {
-            auto parsers = std::make_tuple(_parsers...);
-            Populate<sizeof...(Ts) - 1>(parsers);
-        }
-
-    private:
-        template <size_t Idx>
-        void Populate(Parsers& _parsers)
-        {
-            if constexpr (Idx != 0)
-                Populate<Idx - 1>(_parsers);
-
-            using ParserType = std::tuple_element_t<Idx, Parsers>;
-            using ArgType = std::variant_alternative_t<Idx, Value>;
-
-            this->operator[](Idx) = std::get<Idx>(_parsers).template Map<Value>([](const ParseResult<ArgType>& _value)
-                {
-                    return ParseResult<Value>{.position = _value.position, .value = Value(std::in_place_index<Idx>, _value.value) };
-                });
-        }
-    };
+    template<typename T>
+    Choice<T> operator|(const ParserOperation<T>& _option1, const ParserOperation<T>& _option2) { return Parser(_option1) | Parser(_option2); }
 
     template<typename... Ts>
     struct Variant : public ParserOperation<std::variant<Ts...>>
     {
-        using Parsers = std::vector<std::variant<Parser<Ts>...>>; //TODO: Make this a tuple
+        static constexpr size_t Size = sizeof...(Ts);
+        using Parsers = std::tuple<Parser<Ts>...>;
         using MappedParserResultValue = std::variant<Ts...>;
-        using MappedParser = Parser<MappedParserResultValue>;
-        using MappedParsers = std::vector<MappedParser>;
+        using MappedParsers = std::vector<Parser<MappedParserResultValue>>;
 
         Parsers parsers;
 
@@ -436,60 +436,64 @@ namespace lpc
 
         Parser<std::variant<Ts...>> GetParser() const override
         {
-            return Choice<MappedParserResultValue>(this->name, GenerateMappedParsers()).GetParser();
-        }
-
-        MappedParsers GenerateMappedParsers() const
-        {
-            MappedParsers mappedParsers(parsers.size());
-            PopulateMappedParsers<sizeof...(Ts) - 1>(mappedParsers);
-            return mappedParsers;
+            MappedParsers mappedParsers(Size);
+            PopulateMappedParsers<Size - 1>(mappedParsers);
+            return Choice<MappedParserResultValue>(this->name, mappedParsers).GetParser();
         }
 
         template <size_t Idx>
-        void PopulateMappedParsers(MappedParsers _parsers) const
+        void PopulateMappedParsers(MappedParsers& _parsers) const
         {
-            if constexpr (Idx != 0)
-                PopulateMappedParsers<Idx - 1>(_parsers);
-
             using ArgType = std::variant_alternative_t<Idx, MappedParserResultValue>;
 
-            _parsers[Idx] = std::get<Idx>(parsers[Idx]).template Map<MappedParserResultValue>([](const ParseResult<ArgType>& _value)
+            _parsers[Idx] = std::get<Idx>(parsers).template Map<MappedParserResultValue>([](const ParseResult<ArgType>& _value)
                 {
-                    return ParseResult<MappedParserResultValue>{.position = _value.position, .value = MappedParserResultValue(std::in_place_index<Idx>, _value.value) };
+                    return MappedParserResultValue(std::in_place_index<Idx>, _value.value);
                 });
+
+            if constexpr (Idx != 0)
+                PopulateMappedParsers<Idx - 1>(_parsers);
         }
     };
 
     template<typename Opt1, typename Opt2>
-    Variant<Opt1, Opt2> operator|(const Parser<Opt1>& _option1, const Parser<Opt2>& _option2)
+    Variant<Opt1, Opt2> operator||(const Parser<Opt1>& _option1, const Parser<Opt2>& _option2)
     {
         return Variant<Opt1, Opt2>("(" + _option1.GetName() + " | " + _option2.GetName() + ")", { _option1, _option2 });
     }
 
-    // template<typename... Initial, typename Extra>
-    // Variant<Initial..., Extra> operator|(Variant<Initial...> _initial, const Parser<Extra>& _extra)
-    // {
-    //     auto variant = Variant<Initial..., Extra>(_initial.name, { });
-    //     variant.name.replace(_initial.name.size() - 1, 1, " | " + _extra.GetName() + ")");
+    template<typename... Initial, typename Extra>
+    Variant<Initial..., Extra> operator||(Variant<Initial...> _initial, const Parser<Extra>& _extra)
+    {
+        auto variant = Variant<Initial..., Extra>(_initial.name, std::tuple_cat(_initial.parsers, std::make_tuple(_extra)));
+        variant.name.replace(variant.name.size() - 1, 1, " | " + _extra.GetName() + ")");
+        return variant;
+    }
 
-    //     for(auto& parser : _initial.parsers)
-    //         variant.parsers.push_back(parser);
+    template<typename Opt1, typename Opt2>
+    Variant<Opt1, Opt2> operator||(const ParserOperation<Opt1>& _option1, const Parser<Opt2>& _option2) { return Parser(_option1) || _option2; }
 
-    //     //variant.parsers.push_back(VariantParsers(_extra)[0]);
-    //     return variant;
-    // }
+    template<typename Opt1, typename Opt2>
+    Variant<Opt1, Opt2> operator||(const Parser<Opt1>& _option1, const ParserOperation<Opt2>& _option2) { return _option1 || Parser(_option2); }
 
-    // class LPC
-    // {
-    //     Lexer lexer;
-    //     Parser parser;
-    //     std::set<Lexer::PatternID> ignores;
+    template<typename Opt1, typename Opt2>
+    Variant<Opt1, Opt2> operator||(const ParserOperation<Opt1>& _option1, const ParserOperation<Opt2>& _option2) { return Parser(_option1) || Parser(_option2); }
 
-    // public:
-    //     LPC(Lexer _lexer, Parser _parser, const std::set<Lexer::PatternID>& _ignores = {})
-    //         : lexer(_lexer), parser(_parser), ignores(_ignores) { }
+    template<typename T>
+    class LPC
+    {
+    public:
+        typedef std::tuple<Lexer, Parser<T>, std::set<Lexer::PatternID>> Tuple;
 
-    //     typename Parser::Result Parse(const std::string& _input) { return parser.Parse(_input, lexer, ignores); };
-    // };
+    private:
+        Lexer lexer;
+        Parser<T> parser;
+        std::set<Lexer::PatternID> ignores;
+
+    public:
+        LPC(const Lexer& _lexer, const Parser<T>& _parser, const std::set<Lexer::PatternID>& _ignores = {}) : lexer(_lexer), parser(_parser), ignores(_ignores) { }
+        LPC(const Tuple& _lpc) : LPC(std::get<0>(_lpc), std::get<1>(_lpc), std::get<2>(_lpc)) { }
+
+        ParseResult<T> Parse(const std::string _input) { return parser.Parse(_input, lexer, ignores); }
+    };
 }

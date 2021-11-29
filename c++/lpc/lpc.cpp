@@ -120,27 +120,30 @@ namespace lpc
     bool Lexer::Token::IsEOS() const { return patternID == EOS_PATTERN_ID(); }
     bool Lexer::Token::IsUnknown() const { return patternID == UNKNOWN_PATTERN_ID(); }
 
-    Lexer::Lexer(Action _onEOS, Action _onUnknown) : patterns()
+    Lexer::Lexer(Action _onEOS, Action _onUnknown) : patterns(), patternsMap()
     {
         patternEOS = { .id = EOS_PATTERN_ID(), .regex = Regex(), .action = _onEOS };
         patternUnknown = { .id = UNKNOWN_PATTERN_ID(), .regex = Regex(), .action = _onUnknown };
+
+        patternsMap[patternEOS.id] = &patternEOS;
+        patternsMap[patternUnknown.id] = &patternUnknown;
     }
 
-    Lexer::PatternID Lexer::AddPattern(PatternID _id, Regex _regex, Action _action)
+    const Lexer::Pattern& Lexer::AddPattern(PatternID _id, Regex _regex, Action _action)
     {
         assert(!_id.empty() && "PatternID cannot be empty!");
-        if (HasPatternID(_id))
+        if (HasPattern(_id))
             throw std::runtime_error("Pattern with id '" + _id + "' already exists!");
 
         patterns.push_back(Pattern{ .id = _id, .regex = _regex, .action = _action });
-        return patterns.back().id;
+        return *(patternsMap[patterns.back().id] = &patterns.back());
     }
 
-    Lexer::PatternID Lexer::AddPattern(Regex _regex, Action _action) { return AddPattern("<Pattern: " + std::to_string(patterns.size()) + ">", _regex, _action); }
+    const Lexer::Pattern& Lexer::AddPattern(Regex _regex, Action _action) { return AddPattern("<Pattern: " + std::to_string(patterns.size()) + ">", _regex, _action); }
 
-    Lexer::Token Lexer::Lex(StringStream& _stream)
+    Lexer::Token Lexer::Lex(StringStream& _stream) const
     {
-        Pattern* matchingPattern = nullptr;
+        const Pattern* matchingPattern = nullptr;
         Position position = _stream.GetPosition();
         std::string matchValue;
 
@@ -190,16 +193,15 @@ namespace lpc
         return token;
     }
 
-    bool Lexer::HasPatternID(const PatternID& _id)
-    {
-        for (auto& pattern : patterns)
-        {
-            if (pattern.id == _id)
-                return false;
-        }
+    Parser<std::string> Lexer::Pattern::AsTerminal(std::optional<std::string> _value) const { return Terminal(id, id, _value); }
 
-        return _id == EOS_PATTERN_ID() || _id == UNKNOWN_PATTERN_ID();
+    const Lexer::Pattern& Lexer::GetPattern(const PatternID& _id) const
+    {
+        if (!HasPattern(_id)) { throw std::runtime_error("Pattern with id '" + _id + "' does not exist!"); }
+        else { return *(patternsMap.at(_id)); }
     }
+
+    bool Lexer::HasPattern(const PatternID& _id) const { return patternsMap.contains(_id); }
 
     TokenStream::TokenStream(Lexer* _lexer, StringStream* _ss, const std::set<Lexer::PatternID>& _ignores)
         : Stream({}), lexer(_lexer), ss(_ss), ignores(_ignores)

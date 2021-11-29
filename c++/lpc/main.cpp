@@ -3,77 +3,66 @@
 
 using namespace lpc;
 
+typedef std::string JSON;
+
+class JSONParser : public LPC<JSON>
+{
+public:
+    JSONParser() : LPC(Create()) { }
+
+    static Tuple Create()
+    {
+        Lexer lexer;
+        auto WS = lexer.AddPattern("WS", Regex("\\s+"));
+
+        auto NUMBER = lexer.AddPattern("NUMBER", Regex("-?(0|[1-9][0-9]*)([.][0-9]+)?")).AsTerminal();
+
+        return Tuple(lexer, NUMBER, { WS.id });
+    }
+};
+
 int main()
 {
     std::ifstream file("test.txt");
-    // TestLPC parser("TestParser");
-
-    // std::cout << parser.Parse(IStreamToString(file)).ToString() << std::endl;
 
     Lexer lexer;
     lexer.AddPattern("WS", Regex("\\s+"));
-    lexer.AddPattern("KEYWORD", Regex("let"));
-    lexer.AddPattern("SYMBOL", Regex("=|;"));
-    lexer.AddPattern("ID", Regex("(_|[a-zA-Z])(_|[a-zA-Z0-9])*"));
-    lexer.AddPattern("NUMBER", Regex("-?(0|[1-9][0-9]*)([.][0-9]+)?"));
 
-    auto mapper1 = [=](const ParseResult<std::string>& _value)
-    {
-        std::cout << _value.value << std::endl;
-        return _value;
-    };
+    auto keyword = lexer.AddPattern("KEYWORD", Regex("let"));
+    auto KW_LET = keyword.AsTerminal("let");
 
-    auto mapper = [=](const ParseResult<int>& _value)
-    {
-        std::cout << _value.value << std::endl;
-        return _value;
-    };
+    auto symbol = lexer.AddPattern("SYMBOL", Regex("=|;"));
+    auto SYM_EQ = symbol.AsTerminal("=");
+    auto SYM_SEMICOLON = symbol.AsTerminal(";");
 
-    //auto expr = Choice("EXPR", { Terminal("ID", "ID"), Terminal("NUMBER", "NUMBER") });
-    Parser expr = Terminal("ID", "ID") | Terminal("NUMBER", "NUMBER") | Terminal("LET", "KEYWORD", "let");
-    auto number = Terminal("NUMBER", "NUMBER").Map<int>([](auto _value) { return ParseResult<int>{.position = _value.position, .value = std::stoi(_value.value)}; });
-    //auto expr2 = Variant("EXPR", Terminal("ID", "ID"), Terminal("NUMBER", "NUMBER"));
-    Parser expr2 = Terminal("ID", "ID").Map<std::string>(mapper1) | number.Map<int>(mapper);
+    auto ID = lexer.AddPattern("ID", Regex("(_|[a-zA-Z])(_|[a-zA-Z0-9])*")).AsTerminal();
+    auto NUMBER = lexer.AddPattern("NUMBER", Regex("-?(0|[1-9][0-9]*)([.][0-9]+)?")).AsTerminal();
 
-    // auto s = Sequence("Hi",
-    //     Terminal("LET", "KEYWORD", "let"),
-    //     Terminal("ID", "ID"),
-    //     Terminal("EQ", "SYMBOL", "="),
-    //     expr,
-    //     Terminal("SEMICOLON", "SYMBOL", ";")
-    // );
+    Parser EXPR = ID | NUMBER | KW_LET;
 
-    auto s = Parser("MyParser",
-        Terminal("LET", "KEYWORD", "let") >>
-        Terminal("ID", "ID") &
-        Terminal("EQ", "SYMBOL", "=") >>
-        expr &
-        Terminal("SEMICOLON", "SYMBOL", ";"));
+    auto DECL = Parser("Declaration", KW_LET >> ID & SYM_EQ >> EXPR << SYM_SEMICOLON);
+    auto IDs = Recursive<std::vector<decltype(ID)::Result>>("IDs");
+
+    Parser p = ID || Parser(ID & IDs).Map<std::vector<decltype(ID)::Result>>([](auto _result)
+        {
+            std::vector<decltype(ID)::Result> tail = std::get<1>(_result.value).value;
+            decltype(tail) result = { std::get<0>(_result.value) };
+            result.insert(result.end(), tail.begin(), tail.end());
+            return result;
+        });
+
+    IDs.Set(p.Map<std::vector<decltype(ID)::Result>>([](auto _result) { return _result.value.index() == 1 ? std::get<1>(_result.value) : std::vector<decltype(ID)::Result>({decltype(ID)::Result{.position = _result.position, .value=std::get<0>(_result.value)}}); }));
+
+    auto parser = LPC(lexer, IDs, { "WS" });
 
     try
     {
-        auto r = s.Parse(IStreamToString(file), lexer, { "WS" }).value;
-        auto x = expr2.Parse("123", lexer, { "WS" }).value;
-        std::cout << std::get<0>(r).value << " = " << std::get<1>(r).value << std::get<2>(r).value << std::endl;
-        std::cout << std::get<0>(x) << std::endl;
-        std::cout << 5 << std::endl;
+        auto ids = parser.Parse(IStreamToString(file)).value;
+
+        for (auto id : ids)
+            std::cout << id.value << std::endl;
     }
-    catch (const ParseError& e)
-    {
-        std::cerr << e.what() << std::endl;
-    }
-    // StringStream input(IStreamToString(file));
-    // Lexer lexer = Lexer();
-
-    //     TokenStream stream(&lexer, &input);
-
-    // while (!stream.IsEOS())
-    //     std::cout << stream.GetOffset() << ", " << stream.Get().value << std::endl;
-
-    // stream.SetOffset(9);
-    // std::cout << stream.GetOffset() << ", " << stream.Get().value << std::endl;
-    // stream.SetOffset(14);
-    // std::cout << stream.GetOffset() << ", " << stream.Get().value << std::endl;
+    catch (const ParseError& e) { std::cerr << e.what() << std::endl; }
 
     return 0;
 }
