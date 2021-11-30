@@ -6,51 +6,18 @@ namespace lpc
 
     std::ostream& operator<<(std::ostream& _lhs, const Position& _rhs) { return _lhs << _rhs.ToString(); }
 
-    std::string IStreamToString(std::istream& _stream) { return std::string((std::istreambuf_iterator<char>(_stream)), std::istreambuf_iterator<char>()); }
+    std::string IStreamToString(std::istream& _stream)
+    {
+        auto start = _stream.tellg();
+        auto string = std::string((std::istreambuf_iterator<char>(_stream)), std::istreambuf_iterator<char>());
+        _stream.seekg(start);
+        return string;
+    }
 
     Regex::Regex() : std::regex(), string() { }
     Regex::Regex(const std::string& _string) : std::regex(_string), string(_string) { }
 
     const std::string& Regex::GetString() const { return string; }
-
-    template<typename T>
-    Stream<T>::Stream(std::vector<T>&& _data) : data(std::move(_data)), offset(0) { }
-
-    template<typename T>
-    T Stream<T>::Get() { return IsEOS() ? T() : data[offset++]; }
-
-    template<typename T>
-    T Stream<T>::Peek()
-    {
-        auto initOffset = offset;
-        auto peek = Get();
-        offset = initOffset;
-        return peek;
-    }
-
-    template<typename T>
-    size_t Stream<T>::GetOffset() const { return offset; }
-
-    template<typename T>
-    void Stream<T>::SetOffset(size_t _offset) { offset = std::max<size_t>(0, std::min<size_t>(_offset, data.size())); }
-
-    template<typename T>
-    typename std::vector<T>::iterator Stream<T>::Begin() { return data.begin(); }
-
-    template<typename T>
-    typename std::vector<T>::iterator Stream<T>::End() { return data.end(); }
-
-    template<typename T>
-    typename std::vector<T>::iterator Stream<T>::Current() { return data.begin() + offset; }
-
-    template<typename T>
-    typename std::vector<T>::const_iterator Stream<T>::CBegin() const { return data.cbegin(); }
-
-    template<typename T>
-    typename std::vector<T>::const_iterator Stream<T>::CEnd() const { return data.cend(); }
-
-    template<typename T>
-    typename std::vector<T>::const_iterator Stream<T>::CCurrent() const { return data.cbegin() + offset; }
 
     StringStream::StringStream(const std::string& _data, const Lexer& _lexer, const std::set<Lexer::PatternID>& _ignores)
         : offset(0), data(_data), lineStarts(), lexer(_lexer), tokens(), ignores(_ignores)
@@ -101,7 +68,7 @@ namespace lpc
                 token = &tokens.emplace(start, std::pair{ lexer.Lex(*this), offset - start }).first->second.first;
             }
 
-            if(!ignores.contains(token->patternID))
+            if (!ignores.contains(token->patternID))
                 return *token;
         }
     }
@@ -255,38 +222,5 @@ namespace lpc
     }
 
     bool Lexer::HasPattern(const PatternID& _id) const { return patternsMap.contains(_id); }
-
-    TokenStream::TokenStream(Lexer* _lexer, StringStream* _ss, const std::set<Lexer::PatternID>& _ignores)
-        : Stream({}), lexer(_lexer), ss(_ss), ignores(_ignores)
-    {
-        if (ignores.contains(Lexer::EOS_PATTERN_ID()))
-            throw std::runtime_error(Lexer::EOS_PATTERN_ID() + " cannot be ignored!");
-    }
-
-    Lexer::Token TokenStream::Get()
-    {
-        while (true)
-        {
-            while (GetOffset() >= data.size() && !IsEOS())
-                data.push_back(lexer->Lex(*ss));
-
-            if (IsEOS())
-            {
-                SetOffset(data.size());
-                return data.back();
-            }
-
-            auto& token = data[GetOffset()];
-            SetOffset(GetOffset() + 1);
-
-            if (ignores.contains(token.patternID))
-                continue;
-
-            return token;
-        }
-    }
-
-    Position TokenStream::GetPosition() { return Peek().position; }
-    bool TokenStream::IsEOS() const { return !data.empty() && data[std::min(GetOffset(), data.size() - 1)].IsEOS(); }
 }
 

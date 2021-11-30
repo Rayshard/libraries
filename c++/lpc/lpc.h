@@ -22,7 +22,6 @@ namespace lpc
     };
 
     std::ostream& operator<<(std::ostream& _lhs, const Position& _rhs);
-    std::string IStreamToString(std::istream& _stream);
 
     class Regex : public std::regex
     {
@@ -34,33 +33,7 @@ namespace lpc
         const std::string& GetString() const;
     };
 
-    template<typename T>
-    class Stream
-    {
-        size_t offset;
-
-    protected:
-        std::vector<T> data;
-
-    public:
-        Stream(std::vector<T>&& _data);
-
-        virtual T Get();
-
-        T Peek();
-        size_t GetOffset() const;
-        void SetOffset(size_t _offset);
-
-        typename std::vector<T>::iterator Begin();
-        typename std::vector<T>::iterator End();
-        typename std::vector<T>::iterator Current();
-
-        typename std::vector<T>::const_iterator CBegin() const;
-        typename std::vector<T>::const_iterator CEnd() const;
-        typename std::vector<T>::const_iterator CCurrent() const;
-
-        virtual bool IsEOS() const = 0;
-    };
+    std::string IStreamToString(std::istream& _stream);
 
     template<typename T>
     class Parser;
@@ -108,7 +81,7 @@ namespace lpc
 
         const Pattern& AddPattern(PatternID _id, Regex _regex, Action _action = NoAction());
         const Pattern& AddPattern(Regex _regex, Action _action = NoAction());
-        
+
         Token Lex(StringStream& _stream) const;
 
         const Pattern& GetPattern(const PatternID& _id) const;
@@ -120,7 +93,7 @@ namespace lpc
         size_t offset;
         std::string data;
         std::vector<size_t> lineStarts;
-        
+
         const Lexer lexer;
         std::unordered_map<size_t, std::pair<Lexer::Token, size_t>> tokens;
         std::set<Lexer::PatternID> ignores;
@@ -142,7 +115,7 @@ namespace lpc
 
         void SetOffset(size_t _offset);
         void SetPosition(Position _pos);
-        
+
         std::string GetData(size_t _start) const;
         std::string GetData(size_t _start, size_t _length) const;
 
@@ -157,32 +130,24 @@ namespace lpc
         bool IsEOS() const;
     };
 
-    class TokenStream : public Stream<Lexer::Token>
+    class ParseError : public std::runtime_error
     {
-        Lexer* lexer;
-        StringStream* ss;
-        std::set<Lexer::PatternID> ignores;
+        Position position;
+
     public:
-        TokenStream(Lexer* _lexer, StringStream* _ss, const std::set<Lexer::PatternID>& _ignores = {});
-
-        Lexer::Token Get() override;
-        bool IsEOS() const override;
-        Position GetPosition();
-    };
-
-    struct ParseError : public std::runtime_error
-    {
-        ParseError(const std::string& _msg)
-            : std::runtime_error(_msg) { }
+        ParseError(const std::string& _msg, Position _pos)
+            : std::runtime_error(_msg), position(_pos) { }
 
         ParseError(Position _pos, const std::string& _msg)
-            : std::runtime_error("Error @ " + _pos.ToString() + ": " + _msg) { }
+            : ParseError("Error @ " + _pos.ToString() + ": " + _msg, _pos) { }
 
         ParseError(Position _pos, const std::string& _msg, const ParseError& _appendage)
             : ParseError(_pos, _msg + "\n" + _appendage.what()) { }
 
         ParseError(const ParseError& _e1, const ParseError& _e2)
-            : std::runtime_error(_e1.what() + std::string("\n") + _e2.what()) { }
+            : ParseError(_e1.what() + std::string("\n") + _e2.what(), _e1.position) { }
+
+        const Position& GetPosition() const { return position; }
 
         static ParseError Expectation(const std::string& _expected, const std::string& _found, const Position& _pos)
         {
@@ -202,23 +167,21 @@ namespace lpc
     };
 
     template<typename T>
+    struct ParseResult
+    {
+        Position position;
+        T value;
+
+        ParseResult(Position _pos, T _value) : position(_pos), value(_value) {}
+        ParseResult() : ParseResult(Position(), T()) {}
+    };
+
+    template<typename T>
     class Parser
     {
     public:
-        struct Result
-        {
-            Position position;
-            T value;
-
-            std::string ToString() const
-            {
-                std::stringstream ss;
-                ss << "Result { position = " << position << ", value = \"" << value << "\" }";
-                return ss.str();
-            }
-        };
-
-        typedef std::function<Result(const Position& _pos, TokenStream& _stream)> Function;
+        typedef ParseResult<T> Result;
+        typedef std::function<Result(const Position& _pos, StringStream& _stream)> Function;
 
     private:
         std::string name;
@@ -227,15 +190,15 @@ namespace lpc
     public:
         Parser(const std::string& _name, Function _func) : name(_name), function(_func) { }
 
-        Parser() : Parser("", [](const Position& _pos, TokenStream& _stream) { return Result{ .position = _pos, .value = T() }; }) { }
+        Parser() : Parser("", [](const Position& _pos, StringStream& _stream) { return Result(_pos, T()); }) { }
 
-        Parser(const std::string& _name, Parser<T> _parser) : Parser(_name, [=](const Position& _pos, TokenStream& _stream) { return _parser.Parse(_stream); }) { }
+        Parser(const std::string& _name, Parser<T> _parser) : Parser(_name, [=](const Position& _pos, StringStream& _stream) { return _parser.Parse(_stream); }) { }
 
         Parser(const ParserOperation<T>& _op) : Parser(_op.GetParser()) { }
 
         Parser(const std::string& _name, const ParserOperation<T>& _op) : Parser(_name, _op.GetParser()) { }
 
-        Result Parse(TokenStream& _stream) const
+        Result Parse(StringStream& _stream) const
         {
             auto streamStart = _stream.GetOffset();
 
@@ -247,10 +210,15 @@ namespace lpc
             }
         }
 
-        Result Parse(const std::string& _input, Lexer& _lexer, const std::set<Lexer::PatternID>& _ignores = {}) const
+        Result Parse(const std::string& _input, const Lexer& _lexer, const std::set<Lexer::PatternID>& _ignores = {}) const
         {
-            StringStream ss(_input);
-            TokenStream stream(&_lexer, &ss, _ignores);
+            StringStream stream(_input, _lexer, _ignores);
+            return Parse(stream);
+        };
+
+        Result Parse(const std::string& _input) const
+        {
+            StringStream stream(_input);
             return Parse(stream);
         };
 
@@ -258,13 +226,38 @@ namespace lpc
         using Mapper = std::function<M(const Result&)>;
 
         template<typename M>
-        Parser<M> Map(Mapper<M> _func) const { return Parser<M>(name, [=, function = function](const Position& _pos, TokenStream& _stream) { return typename Parser<M>::Result{ .position = _pos, .value = _func(function(_pos, _stream)) }; }); }
+        Parser<M> Map(Mapper<M> _func) const
+        {
+            return Parser<M>(name, [=, function = function](const Position& _pos, StringStream& _stream)
+                {
+                    auto result = function(_pos, _stream);
+                    return ParseResult<M>(result.position, _func(result));
+                });
+        }
 
         const std::string& GetName() const { return name; }
     };
 
     template<typename T>
-    using ParseResult = typename Parser<T>::Result;
+    class LPC
+    {
+    public:
+        typedef std::tuple<Lexer, Parser<T>, std::set<Lexer::PatternID>> Tuple;
+
+    private:
+        Lexer lexer;
+        Parser<T> parser;
+        std::set<Lexer::PatternID> ignores;
+
+    public:
+        LPC(const Lexer& _lexer, const Parser<T>& _parser, const std::set<Lexer::PatternID>& _ignores = {}) : lexer(_lexer), parser(_parser), ignores(_ignores) { }
+        LPC(const Tuple& _lpc) : LPC(std::get<0>(_lpc), std::get<1>(_lpc), std::get<2>(_lpc)) { }
+
+        ParseResult<T> Parse(const std::string& _input) { return parser.Parse(_input, lexer, ignores); }
+    };
+
+    template<typename T>
+    using Empty = Parser<T>;
 
     template<typename T>
     class Recursive : public Parser<T>
@@ -272,19 +265,16 @@ namespace lpc
         std::shared_ptr<Parser<T>> parser;
 
     public:
-        Recursive(const std::string& _name) : Parser<T>(_name, [=](const Position& _pos, TokenStream& _stream) { return parser->Parse(_stream); }) {}
+        Recursive(const std::string& _name) : Parser<T>(_name, [=](const Position& _pos, StringStream& _stream) { return parser->Parse(_stream); }) {}
 
         void Set(const Parser<T>& _parser) { parser.reset(new Parser<T>(_parser)); }
     };
 
-    template<typename T>
-    using Empty = Parser<T>;
-
     static Parser<std::string> Terminal(const std::string& _name, const Lexer::PatternID& _patternID, std::optional<std::string> _value = std::nullopt)
     {
-        return Parser<std::string>(_name, [=](const Position& _pos, TokenStream& _stream)
+        return Parser<std::string>(_name, [=](const Position& _pos, StringStream& _stream)
             {
-                auto token = _stream.Get();
+                auto token = _stream.GetToken();
 
                 if (token.patternID != _patternID)
                 {
@@ -295,26 +285,167 @@ namespace lpc
                 else if (_value.has_value() && token.value != _value.value())
                     throw ParseError::Expectation("'" + _value.value() + "'", "'" + token.value + "'", token.position);
 
-                return ParseResult<std::string>{.position = _pos, .value = token.value };
+                return ParseResult<std::string>(token.position, token.value);
             });
     }
 
     template<typename T>
-    static Parser<T> Quantified(const Parser<T>& _option1, const Parser<T>& _option2)
+    static Parser<T> Value(const std::string& _name, const T& _value)
     {
-        assert(false && "NOT IMPLEMENTED");
+        return Parser<T>(_name, [=](const Position& _pos, StringStream& _stream) { return ParseResult<T>(_pos, _value); });
+    }
+
+#pragma region Try
+    template<typename Success, typename Error>
+    class TryValue
+    {
+        std::variant<Success, std::pair<Error, ParseError>> result;
+
+    public:
+        TryValue(const std::variant<Success, std::pair<Error, ParseError>>& _result) : result(_result) { }
+
+        bool IsSuccess() const { return result.index() == 0; }
+        bool IsError() const { return result.index() == 1; }
+
+        const Success& GetSuccess() const { return std::get<0>(result); }
+        const Error& GetError() const { return std::get<0>(std::get<1>(result)); }
+        const ParseError& GetParseError() const { return std::get<1>(std::get<1>(result)); }
+
+        static TryValue CreateSuccess(const Success& _success) { return TryValue(std::variant<Success, std::pair<Error, ParseError>>(std::in_place_index<0>, _success)); }
+        static TryValue CreateError(const Error& _error, const ParseError& _parseError) { return TryValue(std::variant<Success, std::pair<Error, ParseError>>(std::in_place_index<1>, std::make_pair(_error, _parseError))); }
+    };
+
+    template<typename Success, typename Error>
+    using TryParser = Parser<TryValue<Success, Error>>;
+
+    template<typename Success, typename Error>
+    using TryResult = ParseResult<TryValue<Success, Error>>;
+
+    template<typename Success, typename Error>
+    static TryParser<Success, Error> Try(const Parser<Success>& _parser, const Error& _error)
+    {
+        return TryParser<Success, Error>("TRY(" + _parser.GetName() + ")", [=](const Position& _pos, StringStream& _stream)
+            {
+                try
+                {
+                    auto result = _parser.Parse(_stream);
+                    return TryResult<Success, Error>(result.position, TryValue<Success, Error>::CreateSuccess(result.value));
+                }
+                catch (const ParseError& e)
+                {
+                    return TryResult<Success, Error>(_pos, TryValue<Success, Error>::CreateError(_error, e));
+                }
+            });
+    }
+#pragma endregion
+
+#pragma region Optional
+    template<typename T>
+    using OptionalValue = std::optional<T>;
+
+    template<typename T>
+    using OptionalParser = Parser<OptionalValue<T>>;
+
+    template<typename T>
+    using OptionalResult = ParseResult<OptionalValue<T>>;
+
+    template<typename T>
+    static OptionalParser<T> Optional(const Parser<T>& _parser)
+    {
+        return OptionalParser<T>(_parser.GetName() + "?", [=](const Position& _pos, StringStream& _stream)
+            {
+                std::optional<T> value;
+
+                try
+                {
+                    auto result = _parser.Parse(_stream);
+                    return OptionalResult<T>(result.position, result.value);
+                }
+                catch (const ParseError& e) { return OptionalResult<T>(_pos, std::nullopt); }
+            });
+    }
+#pragma endregion
+
+#pragma region Quantified
+    template<typename T>
+    using QuantifiedValue = std::vector<ParseResult<T>>;
+
+    template<typename T>
+    using QuantifiedParser = Parser<QuantifiedValue<T>>;
+
+    template<typename T>
+    using QuantifiedResult = ParseResult<QuantifiedValue<T>>;
+
+    template<typename T>
+    static QuantifiedParser<T> Quantified(const std::string& _name, const Parser<T>& _parser, size_t _min, size_t _max)
+    {
+        assert(_max >= _min && "_max must be at least _min");
+
+        return QuantifiedParser<T>(_name, [=](const Position& _pos, StringStream& _stream)
+            {
+                QuantifiedValue<T> results;
+
+                if (_max != 0)
+                {
+                    while (results.size() <= _max)
+                    {
+                        try { results.push_back(_parser.Parse(_stream)); }
+                        catch (const ParseError& e)
+                        {
+                            if (results.size() >= _min)
+                                break;
+
+                            auto error = ParseError::Expectation("at least " + std::to_string(_min) + " '" + _parser.GetName() + "'", "only " + std::to_string(results.size()), _stream.GetPosition());
+                            throw ParseError(error, e);
+                        }
+                    }
+                }
+
+                Position position = results.size() == 0 ? _pos : results[0].position; //this is separated from the return statement because of the unknown order of argument evaluation 
+                return QuantifiedResult<T>(position, std::move(results));
+            });
     }
 
     template<typename T>
-    static Parser<T> Separated(const Parser<T>& _option1, const Parser<T>& _option2)
+    static QuantifiedParser<T> ManyOrOne(const std::string& _name, const Parser<T>& _parser) { return Quantified<T>(_name, _parser, 1, -1); }
+
+    template<typename T>
+    static QuantifiedParser<T> ZeroOrOne(const std::string& _name, const Parser<T>& _parser) { return Quantified<T>(_name, _parser, 0, 1); }
+
+    template<typename T>
+    static QuantifiedParser<T> ZeroOrMore(const std::string& _name, const Parser<T>& _parser) { return Quantified<T>(_name, _parser, 0, -1); }
+#pragma endregion
+
+    template<typename T, typename S>
+    static QuantifiedParser<T> Separated(const std::string& _name, const Parser<T>& _parser, const Parser<S>& _sep, size_t _min = 0, size_t _max = SIZE_T_MAX)
     {
-        assert(false && "NOT IMPLEMENTED");
+        assert(_max >= _min && "_max must be at least _min");
+
+        if (_max == 0) { return Quantified(_name, _parser, 0, 0); }
+        else if (_max == 1) { return ZeroOrOne(_name, _parser); }
+        else
+        {
+            size_t min = _min == 0 ? 0 : _min - 1;
+            Parser tempParser = _parser & Quantified("TAIL(" + _sep.GetName() + ", " + _parser.GetName() + ")", _sep >> _parser, min, _max - 1);
+            Parser parser = tempParser.template Map<QuantifiedValue<T>>([](auto _result)
+            {
+                QuantifiedValue<T> result = { std::get<0>(_result.value) };
+                auto& tail = std::get<1>(_result.value).value;
+                result.insert(result.end(), tail.begin(), tail.end());
+                return result;
+            });
+
+            if(_min == 0)
+                parser = Optional(parser).template Map<QuantifiedValue<T>>([](auto _result) { return _result.value.has_value() ? _result.value.value() : QuantifiedValue<T>(); });
+
+            return Parser(_name, parser);
+        }
     }
 
     template<typename Keep, typename Discard>
     Parser<Keep> operator<<(const Parser<Keep>& _keep, const Parser<Discard>& _discard)
     {
-        return Parser<Keep>("(" + _keep.GetName() + " << " + _discard.GetName() + ")", [keep = _keep, discard = _discard](const Position& _pos, TokenStream& _stream)
+        return Parser<Keep>("(" + _keep.GetName() + " << " + _discard.GetName() + ")", [keep = _keep, discard = _discard](const Position& _pos, StringStream& _stream)
             {
                 auto result = keep.Parse(_stream);
                 discard.Parse(_stream);
@@ -325,34 +456,32 @@ namespace lpc
     template<typename Discard, typename Keep>
     Parser<Keep> operator>>(const Parser<Discard>& _discard, const Parser<Keep>& _keep)
     {
-        return Parser<Keep>("(" + _discard.GetName() + " >> " + _keep.GetName() + ")", [keep = _keep, discard = _discard](const Position& _pos, TokenStream& _stream)
+        return Parser<Keep>("(" + _discard.GetName() + " >> " + _keep.GetName() + ")", [keep = _keep, discard = _discard](const Position& _pos, StringStream& _stream)
             {
                 discard.Parse(_stream);
                 return keep.Parse(_stream);
             });
     }
 
+#pragma region List
     template<typename... Ts>
     struct List : public ParserOperation<std::tuple<ParseResult<Ts>...>>
     {
         using Parsers = std::tuple<Parser<Ts>...>;
         using ParserT = Parser<std::tuple<ParseResult<Ts>...>>;
-        using ParserTResultValue = std::tuple<ParseResult<Ts>...>;
-        using ParserTResult = ParseResult<ParserTResultValue>;
+        using ParserTValue = std::tuple<ParseResult<Ts>...>;
+        using ParserTResult = ParseResult<ParserTValue>;
 
         Parsers parsers;
 
-        List(const std::string& _name, const Parsers& _parsers) : ParserOperation<ParserTResultValue>(_name), parsers(_parsers) { }
+        List(const std::string& _name, const Parsers& _parsers) : ParserOperation<ParserTValue>(_name), parsers(_parsers) { }
 
-        Parser<ParserTResultValue> GetParser() const override
+        Parser<ParserTValue> GetParser() const override
         {
-            return ParserT(this->name, [parsers = parsers](const Position& _pos, TokenStream& _stream)
+            return ParserT(this->name, [parsers = parsers](const Position& _pos, StringStream& _stream)
                 {
-                    return ParserTResult
-                    {
-                        .position = _pos,
-                        .value = std::apply([&](auto &&... _args) { return std::make_tuple(_args.Parse(_stream)...); }, parsers)
-                    };
+                    auto results = std::apply([&](auto &&... _args) { return std::make_tuple(_args.Parse(_stream)...); }, parsers);
+                    return ParserTResult(sizeof...(Ts) == 0 ? _pos : std::get<0>(results).position, results);
                 });
         }
     };
@@ -379,7 +508,9 @@ namespace lpc
 
     template<typename First, typename Second>
     List<First, Second> operator&(const ParserOperation<First>& _first, const ParserOperation<Second>& _second) { return Parser(_first) & Parser(_second); }
+#pragma endregion
 
+#pragma region Choice
     template<typename T>
     struct Choice : public ParserOperation<T>
     {
@@ -391,7 +522,7 @@ namespace lpc
         {
             assert(parsers.size() >= 2 && "Choice expects at least 2 options");
 
-            return Parser<T>(this->name, [parsers = parsers](const Position& _pos, TokenStream& _stream)
+            return Parser<T>(this->name, [parsers = parsers](const Position& _pos, StringStream& _stream)
                 {
                     size_t streamStart = _stream.GetOffset(), greatestLength = 0;
                     std::optional<ParseResult<T>> result;
@@ -414,7 +545,7 @@ namespace lpc
                         catch (const ParseError& e)
                         {
                             if (!result.has_value())
-                                errors.push_back(ParseError(std::regex_replace(e.what(), std::regex("\n"), "\n ")));
+                                errors.push_back(ParseError(std::regex_replace(e.what(), std::regex("\n"), "\n "), e.GetPosition()));
                         }
 
                         _stream.SetOffset(streamStart);
@@ -427,8 +558,8 @@ namespace lpc
                         for (size_t i = 1; i < errors.size(); i++)
                             error = ParseError(error, errors[i]);
 
-                        error = ParseError(std::regex_replace(error.what(), std::regex("\n(?! )"), "\n >> "));
-                        error = ParseError(" >> " + std::regex_replace(error.what(), std::regex("\n(?! >>)"), "\n   "));
+                        error = ParseError(std::regex_replace(error.what(), std::regex("\n(?! )"), "\n >> "), error.GetPosition());
+                        error = ParseError(" >> " + std::regex_replace(error.what(), std::regex("\n(?! >>)"), "\n   "), error.GetPosition());
                         throw error;
                     }
 
@@ -461,34 +592,59 @@ namespace lpc
 
     template<typename T>
     Choice<T> operator|(const ParserOperation<T>& _option1, const ParserOperation<T>& _option2) { return Parser(_option1) | Parser(_option2); }
+#pragma endregion
+
+#pragma region Variant
+    template<typename... Ts>
+    class VariantValue
+    {
+    public:
+        typedef std::variant<Ts...> Type;
+
+    private:
+        Type value;
+
+    public:
+        VariantValue(const Type& _value) : value(_value) { }
+        VariantValue() : value() { }
+
+        template<size_t Idx>
+        bool Is() const { return value.index() == Idx; }
+
+        template<size_t Idx>
+        const std::variant_alternative_t<Idx, Type>& Get() const { return std::get<Idx>(value); }
+
+        template<size_t Idx>
+        static VariantValue Create(const std::variant_alternative_t<Idx, Type>& _value) { return VariantValue(Type(std::in_place_index<Idx>, _value)); }
+    };
 
     template<typename... Ts>
-    struct Variant : public ParserOperation<std::variant<Ts...>>
+    struct Variant : public ParserOperation<VariantValue<Ts...>>
     {
         static constexpr size_t Size = sizeof...(Ts);
         using Parsers = std::tuple<Parser<Ts>...>;
-        using MappedParserResultValue = std::variant<Ts...>;
-        using MappedParsers = std::vector<Parser<MappedParserResultValue>>;
+        using MappedParserValue = VariantValue<Ts...>;
+        using MappedParsers = std::vector<Parser<MappedParserValue>>;
 
         Parsers parsers;
 
-        Variant(const std::string& _name, Parsers _parsers) : ParserOperation<MappedParserResultValue>(_name), parsers(_parsers) { }
+        Variant(const std::string& _name, Parsers _parsers) : ParserOperation<MappedParserValue>(_name), parsers(_parsers) { }
 
-        Parser<std::variant<Ts...>> GetParser() const override
+        Parser<MappedParserValue> GetParser() const override
         {
             MappedParsers mappedParsers(Size);
             PopulateMappedParsers<Size - 1>(mappedParsers);
-            return Choice<MappedParserResultValue>(this->name, mappedParsers).GetParser();
+            return Choice<MappedParserValue>(this->name, mappedParsers).GetParser();
         }
 
         template <size_t Idx>
         void PopulateMappedParsers(MappedParsers& _parsers) const
         {
-            using ArgType = std::variant_alternative_t<Idx, MappedParserResultValue>;
+            using ArgType = std::variant_alternative_t<Idx, typename MappedParserValue::Type>;
 
-            _parsers[Idx] = std::get<Idx>(parsers).template Map<MappedParserResultValue>([](const ParseResult<ArgType>& _value)
+            _parsers[Idx] = std::get<Idx>(parsers).template Map<MappedParserValue>([](const ParseResult<ArgType>& _value)
                 {
-                    return MappedParserResultValue(std::in_place_index<Idx>, _value.value);
+                    return MappedParserValue::template Create<Idx>(_value.value);
                 });
 
             if constexpr (Idx != 0)
@@ -518,22 +674,58 @@ namespace lpc
 
     template<typename Opt1, typename Opt2>
     Variant<Opt1, Opt2> operator||(const ParserOperation<Opt1>& _option1, const ParserOperation<Opt2>& _option2) { return Parser(_option1) || Parser(_option2); }
+#pragma endregion
+
+#pragma region Sum
+    template<typename T>
+    struct Sum : public ParserOperation<std::vector<ParseResult<T>>>
+    {
+        using Parsers = std::vector<Parser<T>>;
+        using ParserTValue = std::vector<ParseResult<T>>;
+        using ParserTResult = ParseResult<ParserTValue>;
+        using ParserT = Parser<ParserTValue>;
+
+        Parsers parsers;
+
+        Sum(const std::string& _name, const Parsers& _parsers) : ParserOperation<ParserTValue>(_name), parsers(_parsers) { }
+
+        ParserT GetParser() const override
+        {
+            return ParserT(this->name, [parsers = parsers](const Position& _pos, StringStream& _stream)
+                {
+                    ParserTValue values;
+
+                    for (auto parser : parsers)
+                        values.push_back(parser.Parse(_stream)); 
+
+                    Position position = values.empty() ? _pos : values[0].position; //this is separated from the return statement because of the unknown order of argument evaluation 
+                    return ParserTResult(position, std::move(values));
+                });
+        }
+    };
 
     template<typename T>
-    class LPC
+    Sum<T> operator+(const Parser<T>& _lhs, const Parser<T>& _rhs)
     {
-    public:
-        typedef std::tuple<Lexer, Parser<T>, std::set<Lexer::PatternID>> Tuple;
+        return Sum<T>("(" + _lhs.GetName() + " + " + _rhs.GetName() + ")", std::vector({ _lhs, _rhs }));
+    }
 
-    private:
-        Lexer lexer;
-        Parser<T> parser;
-        std::set<Lexer::PatternID> ignores;
+    template<typename T>
+    Sum<T> operator+(const Sum<T>& _lhs, const Parser<T>& _rhs)
+    {
+        auto sum = _lhs;
+        sum.name.replace(sum.name.size() - 1, 1, " + " + _rhs.GetName() + ")");
+        sum.parsers.push_back(_rhs);
+        return sum;
+    }
 
-    public:
-        LPC(const Lexer& _lexer, const Parser<T>& _parser, const std::set<Lexer::PatternID>& _ignores = {}) : lexer(_lexer), parser(_parser), ignores(_ignores) { }
-        LPC(const Tuple& _lpc) : LPC(std::get<0>(_lpc), std::get<1>(_lpc), std::get<2>(_lpc)) { }
+    template<typename T>
+    Sum<T> operator+(const ParserOperation<T>& _lhs, const Parser<T>& _rhs) { return Parser(_lhs) + _rhs; }
 
-        ParseResult<T> Parse(const std::string _input) { return parser.Parse(_input, lexer, ignores); }
-    };
+    template<typename T>
+    Sum<T> operator+(const Parser<T>& _lhs, const ParserOperation<T>& _rhs) { return _lhs + Parser(_rhs); }
+
+    template<typename T>
+    Sum<T> operator+(const ParserOperation<T>& _lhs, const ParserOperation<T>& _rhs) { return Parser(_lhs) + Parser(_rhs); }
+#pragma endregion
 }
