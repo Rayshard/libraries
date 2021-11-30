@@ -52,34 +52,87 @@ namespace lpc
     template<typename T>
     typename std::vector<T>::const_iterator Stream<T>::CCurrent() const { return data.cbegin() + offset; }
 
-    StringStream::StringStream(const std::string& _data) : Stream(std::vector(_data.begin(), _data.end())), lineStarts()
+    StringStream::StringStream(const std::string& _data, const Lexer& _lexer, const std::set<Lexer::PatternID>& _ignores)
+        : offset(0), data(_data), lineStarts(), lexer(_lexer), tokens(), ignores(_ignores)
     {
+        if (ignores.contains(Lexer::EOS_PATTERN_ID()))
+            throw std::runtime_error(Lexer::EOS_PATTERN_ID() + " cannot be ignored!");
+
         //Get line starts
         lineStarts.push_back(0);
 
-        for (size_t position = 0; position < _data.size(); position++)
+        for (size_t position = 0; position < data.size(); position++)
         {
-            if (_data[position] == '\n')
+            if (data[position] == '\n')
                 lineStarts.push_back(position + 1);
         }
     }
 
-    void StringStream::Ignore(size_t _amt)
+    StringStream::StringStream(const std::string& _data) : StringStream(_data, Lexer()) { }
+
+    char StringStream::PeekChar()
     {
-        for (size_t i = 0; i < _amt; i++)
-            Get();
+        auto initOffset = offset;
+        auto peek = GetChar();
+        offset = initOffset;
+        return peek;
     }
 
-    std::string StringStream::GetDataAsString(size_t _start, size_t _length) const
+    char StringStream::GetChar() { return IsEOS() ? EOF : data[offset++]; }
+    void StringStream::IgnoreChars(size_t _amt) { offset = std::min(data.size(), offset + _amt); }
+
+    const Lexer::Token& StringStream::GetToken()
+    {
+        while (true)
+        {
+            Lexer::Token* token;
+            auto search = tokens.find(offset);
+
+            if (search != tokens.end())
+            {
+                auto& pair = search->second;
+
+                token = &std::get<0>(pair);
+                offset += pair.second;
+            }
+            else
+            {
+                auto start = offset;
+                token = &tokens.emplace(start, std::pair{ lexer.Lex(*this), offset - start }).first->second.first;
+            }
+
+            if(!ignores.contains(token->patternID))
+                return *token;
+        }
+    }
+
+    const Lexer::Token& StringStream::PeekToken()
+    {
+        auto initOffset = offset;
+        auto& peek = GetToken();
+        offset = initOffset;
+        return peek;
+    }
+
+    void StringStream::SetOffset(size_t _offset) { offset = std::min(_offset, data.size()); } //Recall that size_t is unsigned so no need to bound below
+    size_t StringStream::GetOffset() const { return offset; }
+
+    std::string::iterator StringStream::Begin() { return data.begin(); }
+    std::string::iterator StringStream::End() { return data.end(); }
+    std::string::iterator StringStream::Current() { return data.begin() + offset; }
+    std::string::const_iterator StringStream::CBegin() const { return data.cbegin(); }
+    std::string::const_iterator StringStream::CEnd() const { return data.cend(); }
+    std::string::const_iterator StringStream::CCurrent() const { return data.cbegin() + offset; }
+
+    std::string StringStream::GetData(size_t _start, size_t _length) const
     {
         if (_start + _length > data.size())
             throw std::runtime_error("Parameters out of range of data!");
 
-        auto start = data.begin() + _start;
-        return std::string(start, start + _length);
+        return data.substr(_start, _length);
     }
 
-    std::string StringStream::GetDataAsString(size_t _start) const { return GetDataAsString(_start, data.size() - _start); }
+    std::string StringStream::GetData(size_t _start) const { return GetData(_start, data.size() - _start); }
 
     Position StringStream::GetPosition(size_t _offset) const
     {
@@ -99,7 +152,7 @@ namespace lpc
         return Position{ line, _offset - closestLineStart + 1 };
     }
 
-    Position StringStream::GetPosition() const { return GetPosition(GetOffset()); }
+    Position StringStream::GetPosition() const { return GetPosition(offset); }
 
     void StringStream::SetPosition(Position _pos)
     {
@@ -112,10 +165,10 @@ namespace lpc
         if (_pos.column - 1 > lineWidth)
             throw std::runtime_error("Invaild position: " + _pos.ToString());
 
-        SetOffset(lineStart + _pos.column - 1);
+        offset = lineStart + _pos.column - 1;
     }
 
-    bool StringStream::IsEOS() const { return GetOffset() >= data.size(); }
+    bool StringStream::IsEOS() const { return offset >= data.size(); }
 
     bool Lexer::Token::IsEOS() const { return patternID == EOS_PATTERN_ID(); }
     bool Lexer::Token::IsUnknown() const { return patternID == UNKNOWN_PATTERN_ID(); }
@@ -175,11 +228,11 @@ namespace lpc
             if (!matchingPattern)
             {
                 matchingPattern = &patternUnknown;
-                matchValue = _stream.Peek();
+                matchValue = _stream.PeekChar();
             }
         }
 
-        _stream.Ignore(matchValue.size());
+        _stream.IgnoreChars(matchValue.size());
 
         Token token = {
             .patternID = matchingPattern->id,

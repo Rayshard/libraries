@@ -43,15 +43,16 @@ int main()
     auto DECL = Parser("Declaration", KW_LET >> ID & SYM_EQ >> EXPR << SYM_SEMICOLON);
     auto IDs = Recursive<std::vector<decltype(ID)::Result>>("IDs");
 
-    Parser p = ID || Parser(ID & IDs).Map<std::vector<decltype(ID)::Result>>([](auto _result)
-        {
-            std::vector<decltype(ID)::Result> tail = std::get<1>(_result.value).value;
-            decltype(tail) result = { std::get<0>(_result.value) };
-            result.insert(result.end(), tail.begin(), tail.end());
-            return result;
-        });
+    Parser p = ID
+        || Parser(ID & IDs).Map<std::vector<decltype(ID)::Result>>([](auto _result)
+            {
+                std::vector<decltype(ID)::Result> tail = std::get<1>(_result.value).value;
+                decltype(tail) result = { std::get<0>(_result.value) };
+                result.insert(result.end(), tail.begin(), tail.end());
+                return result;
+            });
 
-    IDs.Set(p.Map<std::vector<decltype(ID)::Result>>([](auto _result) { return _result.value.index() == 1 ? std::get<1>(_result.value) : std::vector<decltype(ID)::Result>({decltype(ID)::Result{.position = _result.position, .value=std::get<0>(_result.value)}}); }));
+    IDs.Set(p.Map<std::vector<decltype(ID)::Result>>([](auto _result) { return _result.value.index() == 1 ? std::get<1>(_result.value) : std::vector<decltype(ID)::Result>({ decltype(ID)::Result{.position = _result.position, .value = std::get<0>(_result.value)} }); }));
 
     auto parser = LPC(lexer, IDs, { "WS" });
 

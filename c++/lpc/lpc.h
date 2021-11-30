@@ -62,25 +62,10 @@ namespace lpc
         virtual bool IsEOS() const = 0;
     };
 
-    class StringStream : public Stream<char>
-    {
-        std::vector<size_t> lineStarts;
-
-    public:
-        StringStream(const std::string& _data);
-
-        bool IsEOS() const override;
-
-        void Ignore(size_t _amt);
-        Position GetPosition(size_t _offset) const;
-        Position GetPosition() const;
-        void SetPosition(Position _pos);
-        std::string GetDataAsString(size_t _start) const;
-        std::string GetDataAsString(size_t _start, size_t _length) const;
-    };
-
     template<typename T>
     class Parser;
+
+    class StringStream;
 
     class Lexer
     {
@@ -123,10 +108,53 @@ namespace lpc
 
         const Pattern& AddPattern(PatternID _id, Regex _regex, Action _action = NoAction());
         const Pattern& AddPattern(Regex _regex, Action _action = NoAction());
+        
         Token Lex(StringStream& _stream) const;
 
         const Pattern& GetPattern(const PatternID& _id) const;
         bool HasPattern(const PatternID& _id) const;
+    };
+
+    class StringStream
+    {
+        size_t offset;
+        std::string data;
+        std::vector<size_t> lineStarts;
+        
+        const Lexer lexer;
+        std::unordered_map<size_t, std::pair<Lexer::Token, size_t>> tokens;
+        std::set<Lexer::PatternID> ignores;
+
+    public:
+        StringStream(const std::string& _data, const Lexer& _lexer, const std::set<Lexer::PatternID>& _ignores = {});
+        StringStream(const std::string& _data);
+
+        char GetChar();
+        char PeekChar();
+        void IgnoreChars(size_t _amt);
+
+        const Lexer::Token& GetToken();
+        const Lexer::Token& PeekToken();
+
+        size_t GetOffset() const;
+        Position GetPosition(size_t _offset) const;
+        Position GetPosition() const;
+
+        void SetOffset(size_t _offset);
+        void SetPosition(Position _pos);
+        
+        std::string GetData(size_t _start) const;
+        std::string GetData(size_t _start, size_t _length) const;
+
+        std::string::iterator Begin();
+        std::string::iterator End();
+        std::string::iterator Current();
+
+        std::string::const_iterator CBegin() const;
+        std::string::const_iterator CEnd() const;
+        std::string::const_iterator CCurrent() const;
+
+        bool IsEOS() const;
     };
 
     class TokenStream : public Stream<Lexer::Token>
@@ -269,6 +297,18 @@ namespace lpc
 
                 return ParseResult<std::string>{.position = _pos, .value = token.value };
             });
+    }
+
+    template<typename T>
+    static Parser<T> Quantified(const Parser<T>& _option1, const Parser<T>& _option2)
+    {
+        assert(false && "NOT IMPLEMENTED");
+    }
+
+    template<typename T>
+    static Parser<T> Separated(const Parser<T>& _option1, const Parser<T>& _option2)
+    {
+        assert(false && "NOT IMPLEMENTED");
     }
 
     template<typename Keep, typename Discard>
