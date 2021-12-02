@@ -416,53 +416,6 @@ namespace lpc
     static QuantifiedParser<T> ZeroOrMore(const std::string& _name, const Parser<T>& _parser) { return Quantified<T>(_name, _parser, 0, -1); }
 #pragma endregion
 
-    template<typename T, typename S>
-    static QuantifiedParser<T> Separated(const std::string& _name, const Parser<T>& _parser, const Parser<S>& _sep, size_t _min = 0, size_t _max = SIZE_T_MAX)
-    {
-        assert(_max >= _min && "_max must be at least _min");
-
-        if (_max == 0) { return Quantified(_name, _parser, 0, 0); }
-        else if (_max == 1) { return ZeroOrOne(_name, _parser); }
-        else
-        {
-            size_t min = _min == 0 ? 0 : _min - 1;
-            Parser tempParser = _parser & Quantified("TAIL(" + _sep.GetName() + ", " + _parser.GetName() + ")", _sep >> _parser, min, _max - 1);
-            Parser parser = tempParser.template Map<QuantifiedValue<T>>([](auto _result)
-            {
-                QuantifiedValue<T> result = { std::get<0>(_result.value) };
-                auto& tail = std::get<1>(_result.value).value;
-                result.insert(result.end(), tail.begin(), tail.end());
-                return result;
-            });
-
-            if(_min == 0)
-                parser = Optional(parser).template Map<QuantifiedValue<T>>([](auto _result) { return _result.value.has_value() ? _result.value.value() : QuantifiedValue<T>(); });
-
-            return Parser(_name, parser);
-        }
-    }
-
-    template<typename Keep, typename Discard>
-    Parser<Keep> operator<<(const Parser<Keep>& _keep, const Parser<Discard>& _discard)
-    {
-        return Parser<Keep>("(" + _keep.GetName() + " << " + _discard.GetName() + ")", [keep = _keep, discard = _discard](const Position& _pos, StringStream& _stream)
-            {
-                auto result = keep.Parse(_stream);
-                discard.Parse(_stream);
-                return result;
-            });
-    }
-
-    template<typename Discard, typename Keep>
-    Parser<Keep> operator>>(const Parser<Discard>& _discard, const Parser<Keep>& _keep)
-    {
-        return Parser<Keep>("(" + _discard.GetName() + " >> " + _keep.GetName() + ")", [keep = _keep, discard = _discard](const Position& _pos, StringStream& _stream)
-            {
-                discard.Parse(_stream);
-                return keep.Parse(_stream);
-            });
-    }
-
 #pragma region List
     template<typename... Ts>
     struct List : public ParserOperation<std::tuple<ParseResult<Ts>...>>
@@ -696,7 +649,7 @@ namespace lpc
                     ParserTValue values;
 
                     for (auto parser : parsers)
-                        values.push_back(parser.Parse(_stream)); 
+                        values.push_back(parser.Parse(_stream));
 
                     Position position = values.empty() ? _pos : values[0].position; //this is separated from the return statement because of the unknown order of argument evaluation 
                     return ParserTResult(position, std::move(values));
@@ -728,4 +681,52 @@ namespace lpc
     template<typename T>
     Sum<T> operator+(const ParserOperation<T>& _lhs, const ParserOperation<T>& _rhs) { return Parser(_lhs) + Parser(_rhs); }
 #pragma endregion
+
+    template<typename T, typename S>
+    static QuantifiedParser<T> Separated(const std::string& _name, const Parser<T>& _parser, const Parser<S>& _sep, size_t _min = 0, size_t _max = SIZE_T_MAX)
+    {
+        assert(_max >= _min && "_max must be at least _min");
+
+        if (_max == 0) { return Quantified(_name, _parser, 0, 0); }
+        else if (_max == 1) { return ZeroOrOne(_name, _parser); }
+        else
+        {
+            size_t min = _min == 0 ? 0 : _min - 1;
+            Parser tempParser = _parser & Quantified("TAIL(" + _sep.GetName() + ", " + _parser.GetName() + ")", _sep >> _parser, min, _max - 1);
+            Parser parser = tempParser.template Map<QuantifiedValue<T>>([](auto _result)
+                {
+                    QuantifiedValue<T> result = { std::get<0>(_result.value) };
+                    auto& tail = std::get<1>(_result.value).value;
+                    result.insert(result.end(), tail.begin(), tail.end());
+                    return result;
+                });
+
+            if (_min == 0)
+                parser = Optional(parser).template Map<QuantifiedValue<T>>([](auto _result) { return _result.value.has_value() ? _result.value.value() : QuantifiedValue<T>(); });
+
+            return Parser(_name, parser);
+        }
+    }
+
+    template<typename Keep, typename Discard>
+    Parser<Keep> operator<<(const Parser<Keep>& _keep, const Parser<Discard>& _discard)
+    {
+        return Parser<Keep>("(" + _keep.GetName() + " << " + _discard.GetName() + ")", [keep = _keep, discard = _discard](const Position& _pos, StringStream& _stream)
+            {
+                auto result = keep.Parse(_stream);
+                discard.Parse(_stream);
+                return result;
+            });
+    }
+
+    template<typename Discard, typename Keep>
+    Parser<Keep> operator>>(const Parser<Discard>& _discard, const Parser<Keep>& _keep)
+    {
+        return Parser<Keep>("(" + _discard.GetName() + " >> " + _keep.GetName() + ")", [keep = _keep, discard = _discard](const Position& _pos, StringStream& _stream)
+            {
+                discard.Parse(_stream);
+                return keep.Parse(_stream);
+            });
+    }
+
 }
