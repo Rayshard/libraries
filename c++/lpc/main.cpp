@@ -29,7 +29,7 @@ int main()
     lexer.AddPattern("WS", Regex("\\s+"));
 
     auto keyword = lexer.AddPattern("KEYWORD", Regex("let"));
-    auto KW_LET = keyword.AsTerminal("let");
+    auto KW_LET = keyword.AsTerminal("let").Satisfy([](auto result) { return result.value == "let"; }, [](auto result) { return "Expected 'le' but found '" + result.value + "'"; });
 
     auto symbol = lexer.AddPattern("SYMBOL", Regex("=|;|,"));
     auto SYM_EQ = symbol.AsTerminal("=");
@@ -66,7 +66,7 @@ int main()
 
     try
     {
-        std::cout << Value("MyValue", 5).Parse(IStreamToString(file)).value << std::endl;
+        std::cout << Between("Between", SYM_COMMA, NUMBER, SYM_SEMICOLON).Parse(", 123 ;", lexer, {"WS"}).value << std::endl;
 
         // auto numbers = NUMBER_LIST.Parse(IStreamToString(file), lexer, {"WS"}).value;
 
@@ -75,12 +75,12 @@ int main()
 
         // std::cout << std::endl;
 
-        auto ids_list = ID_LIST.Parse(IStreamToString(file), lexer, {"WS"}).value;
+        // auto ids_list = ID_LIST.Parse(IStreamToString(file), lexer, { "WS" }).value;
 
-        for(auto& id : ids_list)
-            std::cout << id.value << ", ";
+        // for (auto& id : ids_list)
+        //     std::cout << id.value << ", ";
 
-        std::cout << std::endl;
+        // std::cout << std::endl;
 
         auto decls = parser.Parse(IStreamToString(file)).value;
 
@@ -100,7 +100,7 @@ int main()
         for (auto& error : errors)
             std::cout << error << std::endl;
     }
-    catch (const ParseError& e) { std::cerr << e.what() << std::endl; }
+    catch (const ParseError& e) { std::cerr << e.what() << "\n\nDetails:\n" << e.GetDetails() << std::endl; }
 
     return 0;
 }

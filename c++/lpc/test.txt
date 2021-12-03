@@ -1,6 +1,4 @@
-a d b g
-
 let x = 123;
 let x = 456;
-let x =;
+let x = i;
 let x = 101112;

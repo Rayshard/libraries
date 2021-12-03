@@ -83,6 +83,20 @@ namespace lpc
 
     void StringStream::SetOffset(size_t _offset) { offset = std::min(_offset, data.size()); } //Recall that size_t is unsigned so no need to bound below
     size_t StringStream::GetOffset() const { return offset; }
+    
+    size_t StringStream::GetOffset(const Position& _pos) const
+    {
+        if (_pos.line > lineStarts.size() || _pos.line == 0 || _pos.column == 0)
+            throw std::runtime_error("Invaild position: " + _pos.ToString());
+
+        size_t lineStart = lineStarts[_pos.line - 1];
+        size_t lineWidth = (_pos.line == lineStarts.size() ? data.size() : lineStarts[_pos.line]) - lineStart;
+
+        if (_pos.column - 1 > lineWidth)
+            throw std::runtime_error("Invaild position: " + _pos.ToString());
+
+        return lineStart + _pos.column - 1;
+    }
 
     std::string::iterator StringStream::Begin() { return data.begin(); }
     std::string::iterator StringStream::End() { return data.end(); }
@@ -120,21 +134,7 @@ namespace lpc
     }
 
     Position StringStream::GetPosition() const { return GetPosition(offset); }
-
-    void StringStream::SetPosition(Position _pos)
-    {
-        if (_pos.line > lineStarts.size() || _pos.line == 0 || _pos.column == 0)
-            throw std::runtime_error("Invaild position: " + _pos.ToString());
-
-        size_t lineStart = lineStarts[_pos.line - 1];
-        size_t lineWidth = (_pos.line == lineStarts.size() ? data.size() : lineStarts[_pos.line]) - lineStart;
-
-        if (_pos.column - 1 > lineWidth)
-            throw std::runtime_error("Invaild position: " + _pos.ToString());
-
-        offset = lineStart + _pos.column - 1;
-    }
-
+    void StringStream::SetPosition(Position _pos) { offset = GetOffset(_pos); }
     bool StringStream::IsEOS() const { return offset >= data.size(); }
 
     bool Lexer::Token::IsEOS() const { return patternID == EOS_PATTERN_ID(); }
@@ -222,5 +222,14 @@ namespace lpc
     }
 
     bool Lexer::HasPattern(const PatternID& _id) const { return patternsMap.contains(_id); }
+
+    Parser<std::monostate> Error(const std::string& _name, const std::string& _message)
+    {
+        return Parser<std::monostate>(_name, [=](const Position& _pos, StringStream& _stream)
+            {
+                throw ParseError(_stream.GetPosition(), _message);
+                return ParseResult<std::monostate>(_pos, std::monostate());
+            });
+    }
 }
 

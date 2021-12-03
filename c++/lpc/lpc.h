@@ -110,6 +110,7 @@ namespace lpc
         const Lexer::Token& PeekToken();
 
         size_t GetOffset() const;
+        size_t GetOffset(const Position& _pos) const;
         Position GetPosition(size_t _offset) const;
         Position GetPosition() const;
 
@@ -133,21 +134,18 @@ namespace lpc
     class ParseError : public std::runtime_error
     {
         Position position;
+        std::string message, details;
 
     public:
-        ParseError(const std::string& _msg, Position _pos)
-            : std::runtime_error(_msg), position(_pos) { }
-
-        ParseError(Position _pos, const std::string& _msg)
-            : ParseError("Error @ " + _pos.ToString() + ": " + _msg, _pos) { }
-
-        ParseError(Position _pos, const std::string& _msg, const ParseError& _appendage)
-            : ParseError(_pos, _msg + "\n" + _appendage.what()) { }
+        ParseError(Position _pos, const std::string& _msg, const std::string& _details = "")
+            : std::runtime_error("Error @ " + _pos.ToString() + ": " + _msg), position(_pos), message(_msg), details(_details) { }
 
         ParseError(const ParseError& _e1, const ParseError& _e2)
-            : ParseError(_e1.what() + std::string("\n") + _e2.what(), _e1.position) { }
+            : ParseError(_e1.position, _e1.message, _e2.what() + (_e2.details.empty() ? "" : "\n" + _e2.details) + "\n" + _e1.details) { }
 
         const Position& GetPosition() const { return position; }
+        const std::string& GetMessage() const { return message; }
+        const std::string& GetDetails() const { return details; }
 
         static ParseError Expectation(const std::string& _expected, const std::string& _found, const Position& _pos)
         {
@@ -206,7 +204,7 @@ namespace lpc
             catch (const ParseError& e)
             {
                 _stream.SetOffset(streamStart);
-                throw ParseError(_stream.GetPosition(), "Unable to parse " + name, e);
+                throw ParseError(e, ParseError(_stream.GetPosition(), "Unable to parse " + name));
             }
         }
 
@@ -233,6 +231,31 @@ namespace lpc
                     auto result = function(_pos, _stream);
                     return ParseResult<M>(result.position, _func(result));
                 });
+        }
+
+        Parser<T> Satisfy(std::function<bool(const Result&)> _predicate, std::function<std::string(const Result&)> _onFail)
+        {
+            return Parser<T>(name, [=, function = function](const Position& _pos, StringStream& _stream)
+                {
+                    auto result = function(_pos, _stream);
+
+                    if (_predicate(result)) { return result; }
+                    else { throw ParseError(_stream.GetPosition(), "Failed to satisfy predicate: " + _onFail(result)); }
+                });
+        }
+
+        bool ParsesTo(const T& _value, const std::string& _input, const Lexer& _lexer, const std::set<Lexer::PatternID>& _ignores = {}) { return Parse(_input, _lexer, _ignores).value == _value; }
+
+        bool ParsesTo(const T& _value, const std::string& _input) { return Parse(_input).value == _value; }
+
+        bool ErrorsOn(const std::string& _input, const Lexer& _lexer, const std::set<Lexer::PatternID>& _ignores = {})
+        {
+            try
+            {
+                Parse(_input, _lexer, _ignores);
+                return false;
+            }
+            catch (const ParseError& e) { return true; }
         }
 
         const std::string& GetName() const { return name; }
@@ -396,7 +419,7 @@ namespace lpc
                                 break;
 
                             auto error = ParseError::Expectation("at least " + std::to_string(_min) + " '" + _parser.GetName() + "'", "only " + std::to_string(results.size()), _stream.GetPosition());
-                            throw ParseError(error, e);
+                            throw ParseError(e, error);
                         }
                     }
                 }
@@ -414,6 +437,9 @@ namespace lpc
 
     template<typename T>
     static QuantifiedParser<T> ZeroOrMore(const std::string& _name, const Parser<T>& _parser) { return Quantified<T>(_name, _parser, 0, -1); }
+
+    template<typename T>
+    static QuantifiedParser<T> Exactly(const std::string& _name, const Parser<T>& _parser, size_t _n) { return Quantified<T>(_name, _parser, _n, _n); }
 #pragma endregion
 
 #pragma region List
@@ -492,13 +518,19 @@ namespace lpc
                             {
                                 result = parseResult;
                                 greatestLength = length;
-                                errors.clear();
+                                errors.clear(); //We put this here to save memory
                             }
                         }
                         catch (const ParseError& e)
                         {
                             if (!result.has_value())
-                                errors.push_back(ParseError(std::regex_replace(e.what(), std::regex("\n"), "\n "), e.GetPosition()));
+                            {
+                                auto eLength = _stream.GetOffset(e.GetPosition());
+                                auto errorsLength = errors.empty() ? 0 : _stream.GetOffset(errors.back().GetPosition());
+
+                                if (eLength == errorsLength) { errors.push_back(e); }
+                                else if (eLength > errorsLength) { errors = { e }; }
+                            }
                         }
 
                         _stream.SetOffset(streamStart);
@@ -506,14 +538,17 @@ namespace lpc
 
                     if (!result.has_value())
                     {
-                        ParseError error = errors[0];
+                        if (errors.size() == 1) { throw errors.back(); }
+                        else
+                        {
+                            std::stringstream ss;
+                            ss << "Expected one of the following: " << parsers[0].GetName();
 
-                        for (size_t i = 1; i < errors.size(); i++)
-                            error = ParseError(error, errors[i]);
+                            for (size_t i = 1; i < parsers.size(); i++)
+                                ss << ", " << parsers[i].GetName();
 
-                        error = ParseError(std::regex_replace(error.what(), std::regex("\n(?! )"), "\n >> "), error.GetPosition());
-                        error = ParseError(" >> " + std::regex_replace(error.what(), std::regex("\n(?! >>)"), "\n   "), error.GetPosition());
-                        throw error;
+                            throw ParseError(_stream.GetPosition(), ss.str());
+                        }
                     }
 
                     _stream.SetOffset(streamStart + greatestLength);
@@ -683,7 +718,7 @@ namespace lpc
 #pragma endregion
 
     template<typename T, typename S>
-    static QuantifiedParser<T> Separated(const std::string& _name, const Parser<T>& _parser, const Parser<S>& _sep, size_t _min = 0, size_t _max = SIZE_T_MAX)
+    QuantifiedParser<T> Separated(const std::string& _name, const Parser<T>& _parser, const Parser<S>& _sep, size_t _min = 0, size_t _max = SIZE_T_MAX)
     {
         assert(_max >= _min && "_max must be at least _min");
 
@@ -708,25 +743,58 @@ namespace lpc
         }
     }
 
-    template<typename Keep, typename Discard>
-    Parser<Keep> operator<<(const Parser<Keep>& _keep, const Parser<Discard>& _discard)
+    template<typename T>
+    Parser<ParseError> Not(const Parser<T>& _parser)
     {
-        return Parser<Keep>("(" + _keep.GetName() + " << " + _discard.GetName() + ")", [keep = _keep, discard = _discard](const Position& _pos, StringStream& _stream)
+        return Parser<ParseError>("!" + _parser.GetName(), [=](const Position& _pos, StringStream& _stream)
             {
-                auto result = keep.Parse(_stream);
-                discard.Parse(_stream);
+                try
+                {
+                    _parser.Parse(_stream);
+                    throw ParseError(_stream.GetPosition(), "Expected " + _parser.GetName() + " to fail");
+                }
+                catch (const ParseError& e) { return ParseResult<ParseError>(e.GetPosition(), e); }
+            });
+    }
+
+    Parser<std::monostate> Error(const std::string& _name, const std::string& _message);
+
+    template<typename Open, typename T, typename Close>
+    Parser<T> Between(const std::string& _name, const Parser<Open>& _open, const Parser<T>& _parser, const Parser<Close>& _close)
+    {
+        return Parser<T>(_name, [open = _open, parser = _parser, close = _close](const Position& _pos, StringStream& _stream)
+            {
+                open.Parse(_stream);
+                auto result = parser.Parse(_stream);
+                close.Parse(_stream);
                 return result;
             });
     }
 
-    template<typename Discard, typename Keep>
-    Parser<Keep> operator>>(const Parser<Discard>& _discard, const Parser<Keep>& _keep)
+    template<typename P, typename T>
+    Parser<T> Prefixed(const std::string& _name, const Parser<P>& _prefix, const Parser<T>& _parser)
     {
-        return Parser<Keep>("(" + _discard.GetName() + " >> " + _keep.GetName() + ")", [keep = _keep, discard = _discard](const Position& _pos, StringStream& _stream)
+        return Parser<T>(_name, [parser = _parser, prefix = _prefix](const Position& _pos, StringStream& _stream)
             {
-                discard.Parse(_stream);
-                return keep.Parse(_stream);
+                prefix.Parse(_stream);
+                return parser.Parse(_stream);
             });
     }
 
+    template<typename T, typename S>
+    Parser<T> Suffixed(const std::string& _name, const Parser<T>& _parser, const Parser<S>& _suffix)
+    {
+        return Parser<T>(_name, [parser = _parser, suffix = _suffix](const Position& _pos, StringStream& _stream)
+            {
+                auto result = parser.Parse(_stream);
+                suffix.Parse(_stream);
+                return result;
+            });
+    }
+
+    template<typename Keep, typename Discard>
+    Parser<Keep> operator<<(const Parser<Keep>& _keep, const Parser<Discard>& _discard) { return Suffixed("(" + _keep.GetName() + " << " + _discard.GetName() + ")", _keep, _discard); }
+
+    template<typename Discard, typename Keep>
+    Parser<Keep> operator>>(const Parser<Discard>& _discard, const Parser<Keep>& _keep) {return Prefixed("(" + _discard.GetName() + " >> " + _keep.GetName() + ")", _discard, _keep); }
 }

@@ -3,18 +3,19 @@
     ☐ add unicode support
 ☐ c++:lpc
     ☐ add tests
-    ☐ Change ParseError to inherit from std::exception and override the what func
-        ☐ This will allow you to store a 'trace' in an excpetion
-    ☐ Add Parser<T>.Satisfty(bool(*_predicate)(const Result&)) to parser: succeeds if predicate is true, fails if predicatte is fails
-    ☐ Add Parser<bool>.Test(T _value) to parser: always succeeds, returning a parseresult with value true if parser succeeds with valkue _value
-    ☐ Add Parser<std::monostate> Not(Parser<T> _parser): succeeds if _parser fails
-    ☐ Add Parser<std::monostate> Error(std::string messgae): always fails and uses message and ParseError Message
-    ☐ Add Count(parser, n) = Quantified(parser, min=n, max=n)
-    ☐ Between(open, parser, close) = open >> parser << close
+    ☐ put none template code in cpp file
+    ✔ Change ParseError to inherit from std::exception and override the what func @done(21-12-02 18:29)
+        ✔ This will allow you to store a 'trace' in an excpetion @done(21-12-02 18:29)
+    ✔ Add Parser<T>.Satisfty(bool(*_predicate)(const Result&)) to parser: succeeds if predicate is true, fails if predicatte is fails @done(21-12-02 19:37)
+    ✔ Add Parser<bool>.Test(T _value) to parser: always succeeds, returning a parseresult with value true if parser succeeds with valkue _value @done(21-12-02 19:54)
+    ✔ Add Parser<std::monostate> Not(Parser<T> _parser): succeeds if _parser fails @done(21-12-02 20:07)
+    ✔ Add Parser<std::monostate> Error(std::string messgae): always fails and uses message and ParseError Message @done(21-12-02 20:17)
+    ✔ Add Count(parser, n) = Quantified(parser, min=n, max=n) @done(21-12-02 20:19)
+    ✔ Between(open, parser, close) = open >> parser << close @done(21-12-02 20:29)
     ☐ Chain(parser, op, min, max) op:pair<parser, Left or Right assosiative>
     ☐ Chain(parser, vector<ops>)
-    ☐ Suffixed(parser, suffix) = parser << suffix
-    ☐ Prefixed(prefix, parser) = prefix >> suffix
+    ✔ Suffixed(parser, suffix) = parser << suffix @done(21-12-02 20:34)
+    ✔ Prefixed(prefix, parser) = prefix >> suffix @done(21-12-02 20:34)
     ☐ LookAhead(parser): parsers parse but goes bback to original stream position
     ☐ Regex()
         ☐ Char()
