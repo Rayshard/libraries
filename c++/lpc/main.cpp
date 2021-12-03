@@ -21,12 +21,26 @@ public:
     }
 };
 
+enum class BINOP { ADD, SUB, MUL, DIV };
+
+ParseResult<float> Combiner(const ParseResult<float>& _lhs, const ParseResult<Binop<BINOP>>& _op, const ParseResult<float>& _rhs)
+{
+    switch (_op.value.id)
+    {
+    case BINOP::ADD: return ParseResult(_op.position, _lhs.value + _rhs.value);
+    case BINOP::SUB: return ParseResult(_op.position, _lhs.value - _rhs.value);
+    case BINOP::MUL: return ParseResult(_op.position, _lhs.value * _rhs.value);
+    case BINOP::DIV: return ParseResult(_op.position, _lhs.value / _rhs.value);
+    default: assert(false && "Case not handled!"); break;
+    }
+}
+
 int main()
 {
     std::ifstream file("test.txt");
 
     Lexer lexer;
-    lexer.AddPattern("WS", Regex("\\s+"));
+    auto WS = lexer.AddPattern("WS", Regex("\\s+"));
 
     auto keyword = lexer.AddPattern("KEYWORD", Regex("let"));
     auto KW_LET = keyword.AsTerminal("let").Satisfy([](auto result) { return result.value == "let"; }, [](auto result) { return "Expected 'le' but found '" + result.value + "'"; });
@@ -66,7 +80,15 @@ int main()
 
     try
     {
-        std::cout << Between("Between", SYM_COMMA, NUMBER, SYM_SEMICOLON).Parse(", 123 ;", lexer, {"WS"}).value << std::endl;
+        StringStream stringstream("1 + 2 *p 3 - 4 / 2", lexer, { "WS" });
+        auto add = Terminal("PLUS", Regex("\\s*\\+")).Map<Binop<BINOP>>([](auto result) { return Binop<BINOP>{.id = BINOP::ADD, .precedence = 0, .associatvity = BinopAssociativity::LEFT}; });
+        auto sub = Terminal("MINUS", Regex("\\s*-")).Map<Binop<BINOP>>([](auto result) { return Binop<BINOP>{.id = BINOP::SUB, .precedence = 0, .associatvity = BinopAssociativity::LEFT}; });
+        auto mul = Terminal("MULTIPLY", Regex("\\s*\\*")).Map<Binop<BINOP>>([](auto result) { return Binop<BINOP>{.id = BINOP::MUL, .precedence = 1, .associatvity = BinopAssociativity::LEFT}; });
+        auto div = Terminal("DIVIDE", Regex("\\s*\\/")).Map<Binop<BINOP>>([](auto result) { return Binop<BINOP>{.id = BINOP::DIV, .precedence = 1, .associatvity = BinopAssociativity::LEFT}; });
+        auto binopParser = BinopChain<float, BINOP>("Binop", NUMBER.Map<float>([](auto result){ return std::stof(result.value); }), add | sub | mul | div, Combiner);
+        std::cout << binopParser.Parse(stringstream).value << std::endl;
+
+        //std::cout << Between("Between", SYM_COMMA, NUMBER, SYM_SEMICOLON).Parse(", 123 ;", lexer, {"WS"}).value << std::endl;
 
         // auto numbers = NUMBER_LIST.Parse(IStreamToString(file), lexer, {"WS"}).value;
 

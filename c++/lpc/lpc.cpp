@@ -83,7 +83,7 @@ namespace lpc
 
     void StringStream::SetOffset(size_t _offset) { offset = std::min(_offset, data.size()); } //Recall that size_t is unsigned so no need to bound below
     size_t StringStream::GetOffset() const { return offset; }
-    
+
     size_t StringStream::GetOffset(const Position& _pos) const
     {
         if (_pos.line > lineStarts.size() || _pos.line == 0 || _pos.column == 0)
@@ -222,6 +222,86 @@ namespace lpc
     }
 
     bool Lexer::HasPattern(const PatternID& _id) const { return patternsMap.contains(_id); }
+
+    ParseError::ParseError(Position _pos, const std::string& _msg, const std::string& _details)
+        : std::runtime_error("Error @ " + _pos.ToString() + ": " + _msg), position(_pos), message(_msg), details(_details) { }
+
+    ParseError::ParseError(const ParseError& _e1, const ParseError& _e2)
+        : ParseError(_e1.position, _e1.message, _e2.what() + (_e2.details.empty() ? "" : "\n" + _e2.details) + "\n" + _e1.details) { }
+
+    const Position& ParseError::GetPosition() const { return position; }
+    const std::string& ParseError::GetMessage() const { return message; }
+    const std::string& ParseError::GetDetails() const { return details; }
+
+    ParseError ParseError::Expectation(const std::string& _expected, const std::string& _found, const Position& _pos)
+    {
+        return ParseError(_pos, "Expected " + _expected + ", but found " + _found);
+    }
+
+    Parser<std::string> Terminal(const std::string& _name, const Lexer::PatternID& _patternID, std::optional<std::string> _value)
+    {
+        return Parser<std::string>(_name, [=](const Position& _pos, StringStream& _stream)
+            {
+                auto token = _stream.GetToken();
+
+                if (token.patternID != _patternID)
+                {
+                    auto expected = "'" + _patternID + (_value.has_value() ? "(" + _value.value() + ")" : "") + "'";
+                    auto found = "'" + token.patternID + (token.value.empty() ? "" : "(" + token.value + ")") + "'";
+                    throw ParseError::Expectation(expected, found, token.position);
+                }
+                else if (_value.has_value() && token.value != _value.value())
+                    throw ParseError::Expectation("'" + _value.value() + "'", "'" + token.value + "'", token.position);
+
+                return ParseResult<std::string>(token.position, token.value);
+            });
+    }
+
+    Parser<std::string> Terminal(const std::string& _name, const Regex& _regex, std::optional<std::string> _value)
+    {
+        return Parser<std::string>(_name, [=](const Position& _pos, StringStream& _stream)
+            {
+                const char* current = &*_stream.CCurrent();
+                const char* end = &*_stream.CEnd();
+                std::cmatch regexMatch;
+                std::regex_search(current, end, regexMatch, _regex, std::regex_constants::match_continuous);
+
+                if (regexMatch.size() == 0)
+                    throw ParseError(_pos, "No match found for regular expression: " + _regex.GetString());
+
+                auto match = regexMatch.str();
+
+                if (_value.has_value() && match != _value.value())
+                    throw ParseError::Expectation("'" + _value.value() + "'", "'" + match + "'", _pos);
+
+                _stream.IgnoreChars(match.length());
+                return ParseResult<std::string>(_pos, match);
+            });
+    }
+
+    Parser<std::string> Chars(const std::string& _name, std::optional<std::string> _value) { return Terminal(_name, Regex(".+"), _value); }
+    Parser<std::string> Letters(const std::string& _name, std::optional<std::string> _value) { return Terminal(_name, Regex("[a-zA-Z]+"), _value); }
+    Parser<std::string> Digits(const std::string& _name, std::optional<std::string> _value) { return Terminal(_name, Regex("[0-9]+"), _value); }
+    Parser<std::string> AlphaNums(const std::string& _name, std::optional<std::string> _value) { return Terminal(_name, Regex("[a-zA-Z0-9]+"), _value); }
+    Parser<std::string> Whitespace(const std::string& _name, std::optional<std::string> _value) { return Terminal(_name, Regex("\\s+"), _value); }
+
+    Parser<char> Char(const std::string& _name, std::optional<char> _value)
+    {
+        auto value = _value.has_value() ? std::optional(std::string(1, _value.value())) : std::nullopt;
+        return Terminal(_name, Regex("."), value).Map<char>([](auto result) { return result.value[0]; });
+    }
+
+    Parser<std::monostate> EOS(const std::string& _name)
+    {
+        return Parser<std::monostate>(_name, [=](const Position& _pos, StringStream& _stream)
+            {
+                if (_stream.IsEOS())
+                    return ParseResult(_pos, std::monostate());
+
+                throw ParseError::Expectation("'" + Lexer::EOS_PATTERN_ID() + "'", "'" + std::string(1, _stream.PeekChar()) + "'", _pos);
+            });
+    }
+
 
     Parser<std::monostate> Error(const std::string& _name, const std::string& _message)
     {
