@@ -207,8 +207,8 @@ namespace lpc
             .value = matchValue,
         };
 
-        if (auto action = std::get_if<Function>(&matchingPattern->action)) { token.value = (*action)(_stream, matchValue); }
-        else if (auto action = std::get_if<Procedure>(&matchingPattern->action)) { (*action)(_stream, matchValue); }
+        if (auto action = std::get_if<Function>(&matchingPattern->action)) { token.value = (*action)(_stream, token); }
+        else if (auto action = std::get_if<Procedure>(&matchingPattern->action)) { (*action)(_stream, token); }
 
         return token;
     }

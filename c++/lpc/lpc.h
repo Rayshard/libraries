@@ -14,6 +14,7 @@
 
 namespace lpc
 {
+    //Represents a line and column pair
     struct Position
     {
         size_t line, column;
@@ -33,6 +34,12 @@ namespace lpc
         const std::string& GetString() const;
     };
 
+    /**
+     * Converts the remainder of an std::istream into a string without modifying the stream
+     *
+     * @param _stream std::istream the stream to convert
+     * @return std::string representing the remainder of the stream
+     */
     std::string IStreamToString(std::istream& _stream);
 
     template<typename T>
@@ -47,11 +54,6 @@ namespace lpc
         inline static PatternID EOS_PATTERN_ID() { return "<EOS>"; }
         inline static PatternID UNKNOWN_PATTERN_ID() { return "<UNKNOWN>"; }
 
-        typedef std::monostate NoAction;
-        typedef std::function<void(StringStream&, const std::string&)> Procedure;
-        typedef std::function<std::string(StringStream&, const std::string&)> Function;
-        typedef std::variant<Procedure, Function, NoAction> Action;
-
         struct Token
         {
             PatternID patternID;
@@ -61,6 +63,11 @@ namespace lpc
             bool IsEOS() const;
             bool IsUnknown() const;
         };
+
+        typedef std::monostate NoAction;
+        typedef std::function<void(StringStream&, const Token&)> Procedure;
+        typedef std::function<std::string(StringStream&, const Token&)> Function;
+        typedef std::variant<Procedure, Function, NoAction> Action;
 
         struct Pattern
         {
@@ -214,23 +221,47 @@ namespace lpc
         using Mapper = std::function<M(const Result&)>;
 
         template<typename M>
-        Parser<M> Map(Mapper<M> _func) const
+        Parser<M> Map(const std::string& _name, Mapper<M> _func) const
         {
-            return Parser<M>(name, [=, function = function](const Position& _pos, StringStream& _stream)
+            return Parser<M>(_name, [=, function = function](const Position& _pos, StringStream& _stream)
                 {
                     auto result = function(_pos, _stream);
                     return ParseResult<M>(result.position, _func(result));
                 });
         }
 
-        Parser<T> Satisfy(std::function<bool(const Result&)> _predicate, std::function<std::string(const Result&)> _onFail)
+        template<typename M>
+        Parser<M> Map(Mapper<M> _func) const { return Map(name, _func); }
+
+        Parser<T> Satisfy(std::function<bool(const Result&)> _predicate, std::function<std::string(const Result&)> _onFail) const
         {
             return Parser<T>(name, [=, function = function](const Position& _pos, StringStream& _stream)
                 {
                     auto result = function(_pos, _stream);
 
                     if (_predicate(result)) { return result; }
-                    else { throw ParseError(_stream.GetPosition(), "Failed to satisfy predicate: " + _onFail(result)); }
+                    else { throw ParseError(result.position, "Failed to satisfy predicate: " + _onFail(result)); }
+                });
+        }
+
+        Parser<T> Satisfy(const T& _value, std::function<std::string(const T&)> _onFail = nullptr) const
+        {
+            return Parser<T>(name, [=, function = function](const Position& _pos, StringStream& _stream)
+                {
+                    auto result = function(_pos, _stream);
+
+                    if (result.value == _value) { return result; }
+                    else { throw ParseError(result.position, _onFail ? _onFail(result.value) : (name + " was not satisfied")); }
+                });
+        }
+
+        template<typename C>
+        Parser<C> Chain(std::function<Parser<C>(Result&)> _chainer) const
+        {
+            return Parser<C>(name, [=, function = function](const Position& _pos, StringStream& _stream)
+                {
+                    auto result = function(_pos, _stream);
+                    return _chainer(result).function(_pos, _stream);
                 });
         }
 
@@ -278,7 +309,7 @@ namespace lpc
         std::variant<Success, std::pair<Error, ParseError>> result;
 
     public:
-        TryValue(const std::variant<Success, std::pair<Error, ParseError>>& _result) : result(_result) { }
+        TryValue(const std::variant<Success, std::pair<Error, ParseError>>& _result = Success()) : result(_result) { }
 
         bool IsSuccess() const { return result.index() == 0; }
         bool IsError() const { return result.index() == 1; }
@@ -313,6 +344,9 @@ namespace lpc
                 }
             });
     }
+
+    template<typename T>
+    TryParser<T, std::monostate> Try(const Parser<T>& _parser) { return Try<T, std::monostate>(_parser, std::monostate()); }
 #pragma endregion
 
 #pragma region Optional
@@ -715,6 +749,32 @@ namespace lpc
     {
         return Parser<T>(_name, [=](const Position& _pos, StringStream& _stream) { return BinopChainFunc(_stream, _atom, _op, _bcc, 0); });
     }
+#pragma endregion
+
+#pragma region Fold
+    template<typename T, typename F>
+    Parser<F> FoldL(const std::string& _name, const Parser<T>& _parser, const F& _initial, std::function<void(F&, const ParseResult<T>&)> _func)
+    {
+        return Parser<F>(_name, [=](const Position& _pos, StringStream& _stream)
+            {
+                auto value = _initial;
+
+                while (true)
+                {
+                    std::optional<ParseResult<T>> result;
+
+                    try { result = _parser.Parse(_stream); }
+                    catch (const ParseError& e) { break; }
+
+                    _func(value, result.value());
+                }
+
+                return ParseResult<F>(_pos, value);
+            });
+    }
+
+    template<typename T>
+    Parser<T> FoldL(const std::string& _name, const Parser<T>& _parser, const T& _initial, std::function<void(T&, const ParseResult<T>&)> _func) { return FoldL<T, T>(_name, _parser, _initial, _func); }
 #pragma endregion
 
     template<typename T>
