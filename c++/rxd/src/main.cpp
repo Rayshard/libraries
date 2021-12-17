@@ -1,152 +1,101 @@
 #include <iostream>
-#include <assert.h>
-#include <vector>
-#include <functional>
-#include "SDL2/SDL.h"
+#include "rxd.h"
+#include <chrono>
 
-namespace rxd
+class Application : public rxd::IRunnable
 {
-    void Init()
+    rxd::Window window;
+    size_t UPS = 20, FPS = 60;
+
+public:
+    Application() : window("RXD", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 600, 600 / 16 * 9)
     {
-        if (SDL_Init(SDL_INIT_EVERYTHING) < 0)
-            throw std::runtime_error(std::string("SDL was not initialized properly! Error:\n") + SDL_GetError());
+
     }
 
-    void Run(std::function<void(const SDL_Event&, bool&)> _onEvent)
+    void OnEvent(const SDL_Event& _event) override
     {
-        SDL_Event event;
-        bool running = true;
+        if (_event.type == SDL_QUIT)
+            Quit();
+    }
 
-        while (running)
+protected:
+    void OnStart() override
+    {
+        std::cout << "Application Started" << std::endl;
+        window.Show();
+    }
+
+    void OnRun() override
+    {
+        std::cout << "Application Running..." << std::endl;
+
+        auto start = std::chrono::high_resolution_clock::now();
+        size_t updates = 0, frames = 0, ups = 0, fps = 0;
+        double updateFreq = 1.0 / UPS, renderFreq = 1.0 / FPS, nextUpdate = 0, nextRender = 0;
+
+        while (IsRunning())
         {
-            while (SDL_PollEvent(&event))
-            {
-                _onEvent(event, running);
+            auto delta = (std::chrono::high_resolution_clock::now() - start).count() / 1000000000.0;
 
-                if (event.type == SDL_QUIT)
-                    running = false;
+            if (delta >= 1.0)
+            {
+                ups = updates;
+                updates = 0;
+                nextUpdate = 0;
+                updateFreq = 1.0 / UPS;
+
+                fps = frames;
+                frames = 0;
+                nextRender = 0;
+                renderFreq = 1.0 / FPS;
+
+                delta -= 1.0;
+                start = std::chrono::high_resolution_clock::now();
+
+                std::cout << "UPS: " << ups << ", FPS: " << fps << std::endl;
+                continue;
+            }
+
+            if (delta >= nextUpdate)
+            {
+                Update(delta);
+                updates++;
+                nextUpdate += updateFreq;
+                continue;
+            }
+
+            if (delta >= nextRender)
+            {
+                Render();
+                frames++;
+                nextRender += renderFreq;
+                continue;
             }
         }
     }
 
-    void CleanUp()
+    void OnQuit() override
     {
-        SDL_Quit();
+        std::cout << "Application Quitted" << std::endl;
     }
 
-    struct Color { uint8_t a, r, g, b; };
-
-    class Bitmap
+private:
+    void Update(double _dt)
     {
-        SDL_Surface* surface;
 
-    public:
-        Bitmap(size_t _width, size_t _height) : surface(nullptr)
-        {
-            surface = SDL_CreateRGBSurfaceWithFormat(0, _width, _height, 32, SDL_PIXELFORMAT_ARGB8888);
-            if (!surface)
-                throw std::runtime_error(std::string("Could not create bitmap! Error:\n") + SDL_GetError());
-        }
+    }
 
-        Bitmap() : Bitmap(0, 0) { }
-
-        Bitmap(const Bitmap& _b) : Bitmap(_b.GetWidth(), _b.GetHeight()) { SDL_BlitSurface(_b.surface, NULL, surface, NULL); }
-
-        Bitmap(Bitmap&& _b) noexcept : surface(_b.surface)
-        {
-            std::cout << "moved" <<std::endl;
-            SDL_FreeSurface(_b.surface);
-            _b.surface = nullptr;
-        }
-
-        ~Bitmap()
-        {
-            SDL_FreeSurface(surface);
-        }
-
-        void Fill(Color _color)
-        {
-            SDL_FillRect(surface, NULL, SDL_MapRGBA(surface->format, _color.r, _color.g, _color.b, _color.a));
-        }
-
-        void Blit(SDL_Surface* _surface)
-        {
-            SDL_BlitSurface(_surface, NULL, surface, NULL);
-        }
-
-        void Blit(const Bitmap& _bitmap) { Blit(_bitmap.GetSurface()); }
-
-        Bitmap& operator=(const Bitmap& _b)
-        {
-            if (GetWidth() != _b.GetWidth() || GetHeight() != _b.GetHeight())
-            {
-                SDL_FreeSurface(surface);
-                surface = SDL_CreateRGBSurfaceWithFormat(0, _b.surface->w, _b.surface->h, 32, SDL_PIXELFORMAT_ARGB8888);
-            }
-
-            Blit(_b.surface);
-            return *this;
-        }
-
-        Bitmap& operator=(Bitmap&& _b) noexcept
-        {
-            if (this != &_b)
-            {
-                SDL_FreeSurface(surface);
-                surface = _b.surface;
-                _b.surface = nullptr;
-            }
-
-            return *this;
-        }
-
-        size_t GetWidth() const { return surface->w; }
-        size_t GetHeight() const { return surface->h; }
-        Color* GetPixels() const { return (Color*)surface->pixels; }
-        SDL_Surface* GetSurface() const { return surface; }
-    };
-
-    class Window
+    void Render()
     {
-        SDL_Window* instance;
-        SDL_Surface* surface;
+        rxd::Bitmap screen(window.GetWidth(), window.GetHeight());
+        screen.Fill(rxd::Color{ 0, 0, 255, 255 });
+        screen.SetPixel(100, 100, rxd::Color{ 255, 0, 0, 255 });
 
-    public:
-        Window(std::string _title, size_t _x, size_t _y, size_t _width, size_t _height)
-        {
-            instance = SDL_CreateWindow(_title.c_str(), _x, _y, _width, _height, SDL_WINDOW_RESIZABLE);
-            if (!instance)
-                throw std::runtime_error(std::string("Could not create window! Error:\n") + SDL_GetError());
+        window.UpdateBuffer(screen);
+    }
+};
 
-            surface = SDL_GetWindowSurface(instance);
-        }
-
-        ~Window() { SDL_DestroyWindow(instance); }
-
-        void Show() { SDL_ShowWindow(instance); }
-
-        void Blit(const Bitmap& _bitmap)
-        {
-            SDL_BlitSurface(_bitmap.GetSurface(), NULL, surface, NULL);
-            SDL_UpdateWindowSurface(instance);
-        }
-
-        Bitmap Capture()
-        {
-            Bitmap bitmap(surface->w, surface->h);
-            bitmap.Blit(surface);
-            return bitmap;
-        }
-
-        size_t GetWidth() const { return surface->w; }
-        size_t GetHeight() const { return surface->h; }
-    };
-}
-
-void HandleEvent(const SDL_Event& _event, bool& _running)
-{
-
-}
 
 int main()
 {
@@ -154,16 +103,9 @@ int main()
     {
         rxd::Init();
 
-        rxd::Window window("RXD", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 600, 600 / 16 * 9);
-        window.Show();
+        Application app;
 
-
-        rxd::Bitmap screen(window.GetWidth(), window.GetHeight());
-        screen.Fill(rxd::Color{ 255, 0, 0, 255 });
-
-        window.Blit(screen);
-
-        rxd::Run(HandleEvent);
+        rxd::Run(app);
     }
     catch (const std::exception& _e)
     {
