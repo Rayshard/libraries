@@ -2,7 +2,7 @@
 #include "rxd.h"
 #include <chrono>
 
-class Application : public rxd::IRunnable
+class Application : public rxd::Runnable
 {
     rxd::Window window;
     size_t UPS = 20, FPS = 60;
@@ -15,8 +15,11 @@ public:
 
     void OnEvent(const SDL_Event& _event) override
     {
-        if (_event.type == SDL_QUIT)
-            Quit();
+        switch (_event.type)
+        {
+        case SDL_EventType::SDL_QUIT: Quit(); break;
+        default: break;
+        }
     }
 
 protected:
@@ -90,8 +93,12 @@ private:
     {
         rxd::Bitmap screen(window.GetWidth(), window.GetHeight());
         screen.Fill(rxd::Color{ 0, 0, 255, 255 });
-        screen.SetPixel(100, 100, rxd::Color{ 255, 0, 0, 255 });
 
+        int x, y;
+        SDL_GetMouseState(&x, &y);
+
+        //rxd::Renderer::DrawLine(screen, rxd::Renderer::Vertex{ {100, 100} }, rxd::Renderer::Vertex{ {(double)x, (double)y} });
+        rxd::Renderer::DrawTriangle(screen, rxd::Renderer::Vertex{ {100, 100} }, rxd::Renderer::Vertex{ {200, 200} }, rxd::Renderer::Vertex{ {(double)x, (double)y} });
         window.UpdateBuffer(screen);
     }
 };
