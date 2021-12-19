@@ -2,23 +2,22 @@
 #include "rxd.h"
 #include <chrono>
 
-struct ColorVertex : public rxd::Renderer::Vertex
+namespace ColorVertex
 {
-    rxd::Utilities::Vec2F64 position;
-    rxd::Utilities::Vec4F64 color;
+    constexpr size_t Size = 6;
+    typedef rxd::Renderer::Vertex<Size> Type;
 
-    ColorVertex(rxd::Utilities::Vec2F64 _pos, rxd::Utilities::Vec4F64 _col) : position(_pos), color(_col) { }
-    ColorVertex() : ColorVertex(rxd::Utilities::Vec2F64(), rxd::Utilities::Vec4F64(0, 0, 0, 1)) {}
+    const rxd::Utilities::Vec4F64& GetColor(const Type& _v) { return _v.GetComponent<rxd::Utilities::Vec4F64, 2>(); }
+    void SetColor(Type& _v, const rxd::Utilities::Vec4F64& _value) { return _v.SetComponent<rxd::Utilities::Vec4F64, 2>(_value); }
 
-    double GetX() const override { return position.x; }
-    double GetY() const override { return position.y; }
-
-    static ColorVertex Lerp(const ColorVertex& _start, const ColorVertex& _end, double _amt)
+    Type Create(rxd::Utilities::Vec2F64 _pos, rxd::Utilities::Vec4F64 _col)
     {
-        auto position = rxd::Utilities::Vec2F64::Lerp(_start.position, _end.position, _amt);
-        auto color = rxd::Utilities::Vec4F64::Lerp(_start.color, _end.color, _amt);
-        return ColorVertex(position, color);
+        Type result(_pos);
+        SetColor(result, _col);
+        return result;
     }
+
+    Type Create() { return Create(rxd::Utilities::Vec2F64(), rxd::Utilities::Vec4F64(0, 0, 0, 1)); }
 };
 
 class Application : public rxd::Runnable
@@ -127,26 +126,26 @@ private:
 
         screen->Fill(Color{ 128, 128, 128, 255 });
 
-        rxd::Renderer::VertexShader<ColorVertex, ColorVertex> vs = [](const ColorVertex& _v) { return _v; };
-        rxd::Renderer::PixelShader<ColorVertex> ps = [](const ColorVertex& _v) { return _v.color; };
+        rxd::Renderer::VertexShader<ColorVertex::Type, ColorVertex::Size> vs = [](const ColorVertex::Type& _v) { return _v; };
+        rxd::Renderer::PixelShader<ColorVertex::Size> ps = [](const ColorVertex::Type& _v) { return ColorVertex::GetColor(_v); };
 
         // auto v1 = ColorVertex({ 0, 0 }, Color::Red().ToVec4F64());
         // auto v2 = ColorVertex({ (double)screen->GetWidth() - 1, 0 }, Color::Green().ToVec4F64());
         // auto v3 = ColorVertex({ (double)screen->GetWidth() - 1, (double)screen->GetHeight() - 1 }, Color::Blue().ToVec4F64());
         // auto v4 = ColorVertex({ 0, (double)screen->GetHeight() }, Color::White().ToVec4F64());
 
-        auto v1 = ColorVertex({ 0.25, 0.25 }, Color::Red().ToVec4F64());
-        auto v2 = ColorVertex({ 0.75, 0.25 }, Color::Green().ToVec4F64());
-        auto v3 = ColorVertex({ 0.75, 0.75 }, Color::Blue().ToVec4F64());
-        auto v4 = ColorVertex({ 0.25, 0.25 }, Color::Blue().ToVec4F64());
-        auto v5 = ColorVertex({ 0.75, 0.75 }, Color::Green().ToVec4F64());
-        auto v6 = ColorVertex({ 0.25, 0.75 }, Color::Red().ToVec4F64());
+        auto v1 = ColorVertex::Create({ 0.25, 0.25 }, Color::Red().ToVec4F64());
+        auto v2 = ColorVertex::Create({ 0.75, 0.25 }, Color::Green().ToVec4F64());
+        auto v3 = ColorVertex::Create({ 0.75, 0.75 }, Color::Blue().ToVec4F64());
+        auto v4 = ColorVertex::Create({ 0.25, 0.25 }, Color::Blue().ToVec4F64());
+        auto v5 = ColorVertex::Create({ 0.75, 0.75 }, Color::Green().ToVec4F64());
+        auto v6 = ColorVertex::Create({ 0.25, 0.75 }, Color::Red().ToVec4F64());
 
-        for(int i = 0; i < 50; i++)
-        rxd::Renderer::Rasterize(screen, v1, v2, v3, vs, ps);
+        for (int i = 0; i < 50; i++)
+            rxd::Renderer::Rasterize(screen, v1, v2, v3, vs, ps);
 
-        if(wireframe)
-        rxd::Renderer::Rasterize(screen, v4, v5, v6, vs, ps);
+        if (wireframe)
+            rxd::Renderer::Rasterize(screen, v4, v5, v6, vs, ps);
 
         screen->Update();
         window.FlipScreen(*screen);
