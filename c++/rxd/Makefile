@@ -2,7 +2,7 @@ SRC_DIR = src
 CC = g++-11
 SRC_FILES = $(wildcard $(SRC_DIR)/*.cpp)
 OBJ_NAME = main
-INCLUDE_PATHS = -Iinclude
+INCLUDE_PATHS = -Iinclude -Iinclude/SDL2 -Iinclude/SDL2_image
 LIBRARY_PATHS = -Llib/SDL2 -Llib/SDL2_image
 COMPILER_FLAGS = -std=c++2a -Wall -Wno-unknown-pragmas
 LINKER_FLAGS = -lsdl2 -lsdl2_image

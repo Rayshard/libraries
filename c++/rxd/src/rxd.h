@@ -5,9 +5,9 @@
 #include <functional>
 #include <thread>
 #include <tuple>
+#include <vector>
 #include <cmath>
 #include <concepts>
-#include <iostream> //TODO: remove
 
 //TODO: Move to cpp file
 #define CHECK_SDL(value, message) do { if (!(value)) throw std::runtime_error(std::string(message) + " Error:\n" + SDL_GetError()); } while(false)
@@ -90,24 +90,28 @@ namespace rxd
 
         struct Color
         {
-            uint8_t r, g, b, a;
+            uint8_t a, r, g, b;
 
-            Color(uint8_t _r = 0, uint8_t _g = 0, uint8_t _b = 0, uint8_t _a = 0) : r(_r), g(_g), b(_b), a(_a) { }
+            Color(uint8_t _a, uint8_t _r, uint8_t _g, uint8_t _b) : a(_a), r(_r), g(_g), b(_b) { }
             Color(Vec4F64 _v) : Color(_v.x * 255, _v.y * 255, _v.z * 255, _v.w * 255) { }
+            Color(uint32_t _value) : Color((_value >> 24) & 255, (_value >> 16) & 255, (_value >> 8) & 255, _value & 255) { }
+            Color() : Color(255, 0, 0, 0) { }
 
-            inline Vec4F64 ToVec4F64() { return { r / 255.0, g / 255.0, b / 255.0, a / 255.0 }; }
+            Vec4F64 ToVec4F64() { return { a / 255.0, r / 255.0, g / 255.0, b / 255.0 }; }
 
-            inline static Color Red() { return { 255, 0, 0, 255 }; }
-            inline static Color Green() { return { 0, 255, 0, 255 }; }
-            inline static Color Blue() { return { 0, 0, 255, 255 }; }
+            inline static Color Red() { return { 255, 255, 0, 0 }; }
+            inline static Color Green() { return { 255, 0, 255, 0 }; }
+            inline static Color Blue() { return { 255, 0, 0, 255 }; }
             inline static Color White() { return { 255, 255, 255, 255 }; }
-            inline static Color Black() { return { 0, 0, 0, 255 }; }
+            inline static Color Black() { return { 255, 0, 0, 0 }; }
             inline static Color Clear() { return { 0, 0, 0, 0 }; }
         };
     }
 
     struct Image
     {
+        virtual ~Image() { }
+
         virtual Utilities::Color GetPixel(int64_t _x, int64_t _y) = 0;
         virtual void SetPixel(int64_t _x, int64_t _y, Utilities::Color _col) = 0;
 
@@ -120,10 +124,12 @@ namespace rxd
     protected:
         SDL_Surface* surface;
 
+        Bitmap(SDL_Surface* _surface);
+
     public:
         Bitmap();
         Bitmap(uint64_t _width, uint64_t _height);
-        Bitmap(SDL_Surface* _surface);
+        Bitmap(const std::string& _path);
 
         Bitmap(const Bitmap& _b);
         Bitmap(Bitmap&& _b) noexcept;
@@ -193,7 +199,7 @@ namespace rxd
         virtual ~Screen() { SDL_DestroyTexture(texture); }
 
         void Update() { SDL_UpdateTexture(texture, NULL, surface->pixels, surface->pitch); }
-        Bitmap Capture() { return Bitmap(SDL_DuplicateSurface(this->surface)); }
+        Bitmap Capture() { return Bitmap(*this); }
 
         class Internal
         {
@@ -205,6 +211,39 @@ namespace rxd
 
     namespace Renderer
     {
+        class Target : public Image
+        {
+            Image* image;
+            std::vector<double> depthBuffer;
+
+        public:
+            Target(Image* _image, bool _hasDepthBuffer)
+                : image(_image), depthBuffer(_hasDepthBuffer ? _image->GetWidth() * _image->GetHeight() : 0) { }
+
+            Target(const Target&) = delete;
+            Target& operator= (const Target&) = delete;
+
+            virtual ~Target() { delete image; }
+
+            Utilities::Color GetPixel(int64_t _x, int64_t _y) { return image->GetPixel(_x, _y); }
+            void SetPixel(int64_t _x, int64_t _y, Utilities::Color _col) { image->SetPixel(_x, _y, _col); }
+
+            Utilities::Color GetDepth(int64_t _x, int64_t _y) { return depthBuffer[_x + _y * GetWidth()]; }
+            void SetDepth(int64_t _x, int64_t _y, double _value) { depthBuffer[_x + _y * GetWidth()] = _value; }
+            void ClearDepthBuffer() { std::fill(depthBuffer.begin(), depthBuffer.end(), 0.0); }
+
+            uint64_t GetWidth() { return image->GetWidth(); }
+            uint64_t GetHeight() { return image->GetHeight(); };
+
+            template<typename T>
+                requires std::derived_from<T, Image>
+            T& As() { return *(T*)image; }
+
+            template<typename T>
+                requires std::derived_from<T, Image>
+            const T& As() const { return *(T*)image; }
+        };
+
         template<typename T, size_t Offset, size_t Max>
         concept InRange = Offset * 8 <= Max * 8 - sizeof(T);
 
@@ -212,10 +251,30 @@ namespace rxd
             requires (N >= 2)
         struct Vertex
         {
+            static constexpr size_t Size = N;
+
+            using PixelShader = std::function<Utilities::Color(const Vertex&)>;
+
+            template<typename Input>
+            using VertexShader = std::function<Vertex(const Input&)>;
+
             Vertex(Utilities::Vec2F64 _pos) { SetPosition(_pos); }
 
-            const double& operator[](size_t _i) const { return components[_i]; } //TODO: Should I add ifs to return 0 if out of range?
-            double& operator[](size_t _i) { return components[_i]; } //TODO: Should I add ifs to return 0 if out of range?
+            const double& operator[](size_t _i) const
+            {
+                if (_i >= N)
+                    throw std::out_of_range("Invalid component index: " + std::to_string(_i) + " > " + std::to_string(N - 1));
+
+                return components[_i];
+            }
+
+            double& operator[](size_t _i)
+            {
+                if (_i >= N)
+                    throw std::out_of_range("Invalid component index: " + std::to_string(_i) + " > " + std::to_string(N - 1));
+
+                return components[_i];
+            }
 
             template<typename T, size_t Offset>
                 requires InRange<T, Offset, N>
@@ -245,8 +304,8 @@ namespace rxd
             double components[N];
         };
 
-        template<typename VIn, size_t VOutN>
-        using VertexShader = std::function<Vertex<VOutN>(const VIn&)>;
+        template<typename Input, size_t Output>
+        using VertexShader = std::function<Vertex<Output>(const Input&)>;
 
         template<size_t N>
         using PixelShader = std::function<Utilities::Color(const Vertex<N>&)>;
@@ -274,7 +333,7 @@ namespace rxd
         };
 
         // template<typename VSIn, RasterizableVertex PSIn>
-        // void Rasterize(Image* _target, const VSIn& _v1, const VSIn& _v2, VertexShader<VSIn, PSIn> _vs, PixelShader<PSIn> _ps)
+        // void Rasterize(Target* _target, const VSIn& _v1, const VSIn& _v2, VertexShader<VSIn, PSIn> _vs, PixelShader<PSIn> _ps)
         // {
         //     uint64_t targetWidth = _target->GetWidth(), targetHeight = _target->GetHeight();
 
@@ -336,7 +395,7 @@ namespace rxd
         // }
 
         template<size_t N>
-        void Rasterize(Image* _target, int64_t _yStart, int64_t _yEnd, RasterizedEdge<N>& _lEdge, RasterizedEdge<N>& _rEdge, PixelShader<N> _ps)
+        void Rasterize(Target* _target, int64_t _yStart, int64_t _yEnd, RasterizedEdge<N>& _lEdge, RasterizedEdge<N>& _rEdge, PixelShader<N> _ps)
         {
             uint64_t targetWidth = _target->GetWidth();
 
@@ -357,11 +416,11 @@ namespace rxd
             }
         }
 
-        template<typename VSIn, size_t PSN>
-        void Rasterize(Image* _target, const VSIn& _v1, const VSIn& _v2, const VSIn& _v3, VertexShader<VSIn, PSN> _vs, PixelShader<PSN> _ps, bool _wireframe = false)
+        template<typename VSIn, size_t PSIn>
+        void Rasterize(Target* _target, const VSIn& _v1, const VSIn& _v2, const VSIn& _v3, VertexShader<VSIn, PSIn> _vs, PixelShader<PSIn> _ps, bool _wireframe = false)
         {
             //Sort vertices
-            Vertex<PSN> top = _vs(_v1), middle = _vs(_v2), bottom = _vs(_v3);
+            Vertex<PSIn> top = _vs(_v1), middle = _vs(_v2), bottom = _vs(_v3);
 
             if (std::make_tuple(bottom.GetY(), bottom.GetX()) < std::make_tuple(middle.GetY(), middle.GetX())) { std::swap(bottom, middle); }
             if (std::make_tuple(middle.GetY(), middle.GetX()) < std::make_tuple(top.GetY(), top.GetX())) { std::swap(middle, top); }
@@ -381,7 +440,7 @@ namespace rxd
 
                 uint64_t targetHeight = _target->GetHeight();
                 int64_t y = std::ceil(top.GetY() * targetHeight), yEnd1 = std::ceil(middle.GetY() * targetHeight), yEnd2 = std::ceil(bottom.GetY() * targetHeight);
-                auto xTB = RasterizedEdge<PSN>(top, bottom, 1.0 / (yEnd2 - y)), xTM = RasterizedEdge<PSN>(top, middle, 1.0 / (yEnd1 - y)), xMB = RasterizedEdge<PSN>(middle, bottom, 1.0 / (yEnd2 - yEnd1));
+                auto xTB = RasterizedEdge<PSIn>(top, bottom, 1.0 / (yEnd2 - y)), xTM = RasterizedEdge<PSIn>(top, middle, 1.0 / (yEnd1 - y)), xMB = RasterizedEdge<PSIn>(middle, bottom, 1.0 / (yEnd2 - yEnd1));
 
                 if (rightHanded)
                 {

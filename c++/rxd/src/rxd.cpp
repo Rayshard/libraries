@@ -1,12 +1,20 @@
 #include "rxd.h"
+#include <filesystem>
+#include <set>
+#include "SDL2_image/SDL_image.h"
 
 namespace rxd
 {
     static bool initialized = false;
+    static SDL_PixelFormat* pixelFormat;
 
     void Init()
     {
         CHECK_SDL(SDL_Init(SDL_INIT_EVERYTHING) >= 0, "SDL was not initialized properly!");
+
+        IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG | IMG_INIT_TIF | IMG_INIT_WEBP);
+
+        pixelFormat = SDL_AllocFormat(SDL_PIXELFORMAT_ARGB8888);
         initialized = true;
     }
 
@@ -31,8 +39,11 @@ namespace rxd
         if (!initialized)
             throw std::runtime_error("RXD is not initialized! Call rxd::Init() to initialize RXD.");
 
-        initialized = false;
+        SDL_FreeFormat(pixelFormat);
+        IMG_Quit();
         SDL_Quit();
+
+        initialized = false;
     }
 
 #pragma region Runnable
@@ -58,14 +69,46 @@ namespace rxd
     bool Runnable::IsRunning() const { return running; }
 #pragma endregion
 
+    namespace Utilities
+    {
+        
+    }
+
 #pragma region Bitmap
     Bitmap::Bitmap(uint64_t _width, uint64_t _height) : surface(nullptr)
     {
-        surface = SDL_CreateRGBSurfaceWithFormat(0, _width, _height, 32, SDL_PIXELFORMAT_ARGB8888);
+        surface = SDL_CreateRGBSurfaceWithFormat(0, _width, _height, 32, pixelFormat->format);
         CHECK_SDL(surface, "Could not create bitmap!");
     }
 
-    Bitmap::Bitmap(SDL_Surface* _surface) : surface(_surface) { }
+    Bitmap::Bitmap(SDL_Surface* _surface) : surface(_surface)
+    {
+        if (surface->format->format != pixelFormat->format)
+        {
+            auto convertedSurface = SDL_ConvertSurface(surface, pixelFormat, 0);
+            CHECK_SDL(convertedSurface, "Could not create bitmap!");
+
+            SDL_FreeSurface(surface);
+            surface = convertedSurface;
+        }
+    }
+
+    Bitmap::Bitmap(const std::string& _path)
+    {
+        std::string extension = std::filesystem::path(_path).extension();
+
+        SDL_Surface* original = extension == "bmp" ? SDL_LoadBMP(_path.c_str()) : IMG_Load(_path.c_str());
+        CHECK_SDL(original, "Cannot load bitmap from file: " + _path);
+
+        if (original->format->format != pixelFormat->format)
+        {
+            auto convertedSurface = SDL_ConvertSurface(original, pixelFormat, 0);
+            CHECK_SDL(convertedSurface, "Could not create bitmap!");
+
+            surface = convertedSurface;
+        }
+        else { surface = original; }
+    }
 
     Bitmap::Bitmap() : Bitmap(0, 0) { }
 
