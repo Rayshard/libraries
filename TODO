@@ -25,7 +25,10 @@
         ✔ Digits() @done(21-12-02 23:32)
         ✔ AlphaNum() @done(21-12-02 23:32)
 ☐ c++/rxd
+    ☐ take away vertex shader as parameter so that it isn't calculated multiple times per vertex if triangle share a vertex
     ☐ depth buffer
+    ☐ perspective interpolation
+    ☐ threading: send mesh (ptr) to a thread to have vertex shader applied to all vertices, then when it's finished, have it send the mesh (ptr) to a queue on the main thread to be rendered
     
 
 ☐ unittest
