@@ -4,7 +4,6 @@
 #include <string>
 #include <functional>
 #include <thread>
-#include <tuple>
 #include <vector>
 #include <concepts>
 #include "math.h"
@@ -42,7 +41,7 @@ namespace rxd
     namespace Utilities
     {
         using namespace math;
-        
+
         struct Color
         {
             uint8_t a, r, g, b;
@@ -357,7 +356,7 @@ namespace rxd
             for (int64_t y = _yStart; y < _yEnd; ++y)
             {
                 const Vertex<N>& vLeft = _lEdge.GetValue(), & vRight = _rEdge.GetValue();
-                int64_t xStart = std::ceil(vLeft.GetX() * targetWidth), xEnd = std::ceil(vRight.GetX() * targetWidth);
+                int64_t xStart = std::ceil((vLeft.GetX() + 0.5) * targetWidth), xEnd = std::ceil((vRight.GetX() + 0.5) * targetWidth);
                 auto scanLine = RasterizedEdge<N>(vLeft, vRight, 1.0 / (xEnd - xStart));
 
                 for (int64_t x = xStart; x < xEnd; x++)
@@ -371,15 +370,15 @@ namespace rxd
             }
         }
 
-        template<typename VSIn, size_t PSIn>
-        void Rasterize(Target* _target, const VSIn& _v1, const VSIn& _v2, const VSIn& _v3, VertexShader<VSIn, PSIn> _vs, PixelShader<PSIn> _ps, bool _wireframe = false)
+        template<size_t N>
+        void Rasterize(Target* _target, const Vertex<N>& _v1, const Vertex<N>& _v2, const Vertex<N>& _v3, PixelShader<N> _ps, bool _wireframe = false)
         {
             //Sort vertices
-            Vertex<PSIn> top = _vs(_v1), middle = _vs(_v2), bottom = _vs(_v3);
+            const Vertex<N>* top = &_v1, * middle = &_v2, * bottom = &_v3;
 
-            if (std::make_tuple(bottom.GetY(), bottom.GetX()) < std::make_tuple(middle.GetY(), middle.GetX())) { std::swap(bottom, middle); }
-            if (std::make_tuple(middle.GetY(), middle.GetX()) < std::make_tuple(top.GetY(), top.GetX())) { std::swap(middle, top); }
-            if (std::make_tuple(bottom.GetY(), bottom.GetX()) < std::make_tuple(middle.GetY(), middle.GetX())) { std::swap(bottom, middle); }
+            if (bottom->GetY() < middle->GetY()) { std::swap(bottom, middle); }
+            if (middle->GetY() < top->GetY()) { std::swap(middle, top); }
+            if (bottom->GetY() < middle->GetY()) { std::swap(bottom, middle); }
 
             //Rasterize
             if (_wireframe)
@@ -390,12 +389,12 @@ namespace rxd
             }
             else
             {
-                auto topToBottom = bottom.GetPosition() - top.GetPosition(), topToMiddle = middle.GetPosition() - top.GetPosition();
+                auto topToBottom = bottom->GetPosition() - top->GetPosition(), topToMiddle = middle->GetPosition() - top->GetPosition();
                 bool rightHanded = topToMiddle[0] * topToBottom[1] - topToBottom[0] * topToMiddle[1] >= 0;
 
                 uint64_t targetHeight = _target->GetHeight();
-                int64_t y = std::ceil(top.GetY() * targetHeight), yEnd1 = std::ceil(middle.GetY() * targetHeight), yEnd2 = std::ceil(bottom.GetY() * targetHeight);
-                auto xTB = RasterizedEdge<PSIn>(top, bottom, 1.0 / (yEnd2 - y)), xTM = RasterizedEdge<PSIn>(top, middle, 1.0 / (yEnd1 - y)), xMB = RasterizedEdge<PSIn>(middle, bottom, 1.0 / (yEnd2 - yEnd1));
+                int64_t y = std::ceil((top->GetY() + 0.5) * targetHeight), yEnd1 = std::ceil((middle->GetY() + 0.5) * targetHeight), yEnd2 = std::ceil((bottom->GetY() + 0.5) * targetHeight);
+                auto xTB = RasterizedEdge<N>(*top, *bottom, 1.0 / (yEnd2 - y)), xTM = RasterizedEdge<N>(*top, *middle, 1.0 / (yEnd1 - y)), xMB = RasterizedEdge<N>(*middle, *bottom, 1.0 / (yEnd2 - yEnd1));
 
                 if (rightHanded)
                 {
@@ -407,6 +406,29 @@ namespace rxd
                     Rasterize(_target, y, yEnd1, xTM, xTB, _ps);
                     Rasterize(_target, yEnd1, yEnd2, xMB, xTB, _ps);
                 }
+            }
+        }
+
+        template<size_t N>
+        void Rasterize(Target* _target, const std::vector<Vertex<N>>& _vertices, PixelShader<N> _ps, bool _wireframe = false)
+        {
+            switch (_vertices.size())
+            {
+            case 0: break;
+            case 1:
+            {
+                auto& vertex = _vertices[0];
+                _target->SetPixel((vertex.GetX() + 0.5) * _target->GetWidth(), (vertex.GetY() + 0.5) * _target->GetHeight(), _ps(vertex));
+            } break;
+            case 2:
+            {
+                throw std::runtime_error("Not implemented for 2 vertices");
+            } break;
+            default:
+            {
+                for (auto it = _vertices.begin(); it != _vertices.end() - 2; ++it)
+                    Rasterize(_target, *it, *(it + 1), *(it + 2), _ps, _wireframe);
+            } break;
             }
         }
     }

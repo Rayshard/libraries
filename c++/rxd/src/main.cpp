@@ -161,7 +161,7 @@ private:
         using namespace rxd::Utilities;
 
         screen->ClearDepthBuffer();
-        screen->As<rxd::Screen>().Fill(Color{ 128, 128, 128, 255 });
+        screen->As<rxd::Screen>().Fill(Color{ 255, 128, 128, 128 });
 
         //ColorVertex::VertexShader<ColorVertex> vs = [](const ColorVertex& _v) { return _v; };
         TextureVertex::VertexShader<TextureVertex> vs = [](const TextureVertex& _v) { return _v; };
@@ -171,17 +171,16 @@ private:
         // auto v3 = ColorVertex({ 0.75, 0.75 }, Color::Blue().ToVec4F64());
         // auto v4 = ColorVertex({ 0.25, 0.75 }, Color::White().ToVec4F64());
 
-        auto v1 = TextureVertex(Vec2F64({ 0.25, 0.25 }), Vec2F64({ 0.0, 0.0 }));
-        auto v2 = TextureVertex(Vec2F64({ 0.75, 0.25 }), Vec2F64({ 1.0, 0.0 }));
-        auto v3 = TextureVertex(Vec2F64({ 0.75, 0.75 }), Vec2F64({ 1.0, 1.0 }));
-        auto v4 = TextureVertex(Vec2F64({ 0.25, 0.75 }), Vec2F64({ 0.0, 1.0 }));
-
+        std::vector<rxd::Renderer::Vertex<TextureVertex::Size>> vertices =
+        {
+            TextureVertex(Vec2F64({ -0.25, -0.25 }), Vec2F64({ 0.0, 0.0 })),
+            TextureVertex(Vec2F64({ +0.25, -0.25 }), Vec2F64({ 1.0, 0.0 })),
+            TextureVertex(Vec2F64({ -0.25, +0.25 }), Vec2F64({ 0.0, 1.0 })),
+            //TextureVertex(Vec2F64({ +0.25, +0.25 }), Vec2F64({ 1.0, 1.0 })),
+        };
 
         for (int i = 0; i < 1; i++)
-        {
-            rxd::Renderer::Rasterize(screen, v1, v2, v3, vs, ps);
-            rxd::Renderer::Rasterize(screen, v1, v3, v4, vs, ps);
-        }
+            rxd::Renderer::Rasterize(screen, vertices, ps);
 
         screen->As<rxd::Screen>().Update();
         window.FlipScreen(screen->As<rxd::Screen>());
