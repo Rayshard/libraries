@@ -180,7 +180,7 @@ private:
         };
 
         for (int i = 0; i < 1; i++)
-            rxd::Renderer::Rasterize(screen, vertices, ps);
+            rxd::Renderer::Rasterize(screen, vertices[0], vertices[1], vertices[2], ps);
 
         screen->As<rxd::Screen>().Update();
         window.FlipScreen(screen->As<rxd::Screen>());
