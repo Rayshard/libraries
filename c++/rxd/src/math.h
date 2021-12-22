@@ -201,6 +201,9 @@ namespace rxd::math
         return result;
     }
 
+    template<size_t D, typename T>
+    std::ostream& operator<<(std::ostream& _lhs, const Vector<D, T>& _rhs) { return _lhs << ToString(_rhs); }
+
     typedef Vector<2, double> Vec2F64;
     typedef Vector<4, double> Vec4F64;
 }

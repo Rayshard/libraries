@@ -1,39 +1,43 @@
 #include <iostream>
 #include "rxd.h"
 #include <chrono>
+#include <array>
+
+using namespace rxd::math;
+using namespace rxd::Utilities;
 
 struct ColorVertex : public rxd::Renderer::Vertex<6>
 {
-    ColorVertex(rxd::Utilities::Vec2F64 _pos, rxd::Utilities::Vec4F64 _col) : Vertex(_pos)
+    ColorVertex(Vec2F64 _pos, Vec4F64 _col) : Vertex(_pos)
     {
         SetColor(_col);
     }
 
-    ColorVertex() : ColorVertex(rxd::Utilities::Vec2F64(), rxd::Utilities::Vec4F64({ 0, 0, 0, 1 })) { }
+    ColorVertex() : ColorVertex(Vec2F64(), Vec4F64({ 0, 0, 0, 1 })) { }
 
     ColorVertex(const Vertex& _v) : Vertex(_v) { }
 
-    rxd::Utilities::Vec4F64& GetColor() { return GetComponent<rxd::Utilities::Vec4F64, 2>(); }
-    const rxd::Utilities::Vec4F64& GetColor() const { return GetComponent<rxd::Utilities::Vec4F64, 2>(); }
-    void SetColor(const rxd::Utilities::Vec4F64& _value) { return SetComponent<rxd::Utilities::Vec4F64, 2>(_value); }
+    Vec4F64& GetColor() { return GetComponent<Vec4F64, 2>(); }
+    const Vec4F64& GetColor() const { return GetComponent<Vec4F64, 2>(); }
+    void SetColor(const Vec4F64& _value) { return SetComponent<Vec4F64, 2>(_value); }
 
     static PixelShader DefaultPS() { return [](const ColorVertex& _v) { return _v.GetColor(); }; }
 };
 
 struct TextureVertex : public rxd::Renderer::Vertex<4>
 {
-    TextureVertex(rxd::Utilities::Vec2F64 _pos, rxd::Utilities::Vec2F64 _texCoords) : Vertex(_pos)
+    TextureVertex(Vec2F64 _pos, Vec2F64 _texCoords) : Vertex(_pos)
     {
         SetTexCoords(_texCoords);
     }
 
-    TextureVertex() : TextureVertex(rxd::Utilities::Vec2F64(), rxd::Utilities::Vec2F64()) { }
+    TextureVertex() : TextureVertex(Vec2F64(), Vec2F64()) { }
 
     TextureVertex(const Vertex& _v) : Vertex(_v) { }
 
-    rxd::Utilities::Vec2F64& GetTexCoords() { return GetComponent<rxd::Utilities::Vec2F64, 2>(); }
-    const rxd::Utilities::Vec2F64& GetTexCoords() const { return GetComponent<rxd::Utilities::Vec2F64, 2>(); }
-    void SetTexCoords(const rxd::Utilities::Vec2F64& _value) { return SetComponent<rxd::Utilities::Vec2F64, 2>(_value); }
+    Vec2F64& GetTexCoords() { return GetComponent<Vec2F64, 2>(); }
+    const Vec2F64& GetTexCoords() const { return GetComponent<Vec2F64, 2>(); }
+    void SetTexCoords(const Vec2F64& _value) { return SetComponent<Vec2F64, 2>(_value); }
 
     static PixelShader DefaultPS(rxd::Image* _texture)
     {
@@ -51,7 +55,7 @@ class Application : public rxd::Runnable
 {
     rxd::Window window;
     rxd::Renderer::Target* screen;
-    size_t UPS = 20, FPS = 10000;
+    size_t UPS = 20, FPS = 60;
 
     bool wireframe = false;
 
@@ -96,7 +100,7 @@ protected:
         window.Show();
 
         texture = new rxd::Bitmap("/Users/rayshardthompson/Documents/GitHub/libraries/c++/rxd/texture.png");
-        texture->SetPixel(0, 0, rxd::Utilities::Color::Red());
+        texture->SetPixel(0, 0, Color::Red());
 
         ps = TextureVertex::DefaultPS(texture);
     }
@@ -171,16 +175,18 @@ private:
         // auto v3 = ColorVertex({ 0.75, 0.75 }, Color::Blue().ToVec4F64());
         // auto v4 = ColorVertex({ 0.25, 0.75 }, Color::White().ToVec4F64());
 
-        std::vector<rxd::Renderer::Vertex<TextureVertex::Size>> vertices =
+        std::vector<TextureVertex> vertices =
         {
             TextureVertex(Vec2F64({ -0.25, -0.25 }), Vec2F64({ 0.0, 0.0 })),
             TextureVertex(Vec2F64({ +0.25, -0.25 }), Vec2F64({ 1.0, 0.0 })),
-            TextureVertex(Vec2F64({ -0.25, +0.25 }), Vec2F64({ 0.0, 1.0 })),
-            //TextureVertex(Vec2F64({ +0.25, +0.25 }), Vec2F64({ 1.0, 1.0 })),
+            TextureVertex(Vec2F64({ +0.25, +0.25 }), Vec2F64({ 1.0, 1.0 })),
+            TextureVertex(Vec2F64({ -0.25, +0.25 }), Vec2F64({ 0.0, 1.0 }))
         };
 
+        auto mesh = rxd::Renderer::Mesh<TextureVertex>(std::move(vertices), { {0, 1, 2}, {0, 2, 3} });
+
         for (int i = 0; i < 1; i++)
-            rxd::Renderer::Rasterize(screen, vertices[0], vertices[1], vertices[2], ps);
+            rxd::Renderer::Rasterize(screen, mesh.GetTriangles(), ps);
 
         screen->As<rxd::Screen>().Update();
         window.FlipScreen(screen->As<rxd::Screen>());

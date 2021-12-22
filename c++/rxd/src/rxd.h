@@ -7,12 +7,15 @@
 #include <vector>
 #include <concepts>
 #include "math.h"
+#include <iostream> //TODO: Remove
 
 //TODO: Move to cpp file
 #define CHECK_SDL(value, message) do { if (!(value)) throw std::runtime_error(std::string(message) + " Error:\n" + SDL_GetError()); } while(false)
 
 namespace rxd
 {
+    using namespace math;
+
     class Runnable
     {
         bool running;
@@ -40,8 +43,6 @@ namespace rxd
 
     namespace Utilities
     {
-        using namespace math;
-
         struct Color
         {
             uint8_t a, r, g, b;
@@ -212,7 +213,7 @@ namespace rxd
             template<typename Input>
             using VertexShader = std::function<Vertex(const Input&)>;
 
-            Vertex(Utilities::Vec2F64 _pos) { SetPosition(_pos); }
+            Vertex(Vec2F64 _pos) { SetPosition(_pos); }
 
             const double& operator[](size_t _i) const
             {
@@ -242,9 +243,9 @@ namespace rxd
                 requires InRange<T, Offset, N>
             void SetComponent(const T& _value) { *(T*)&components[Offset] = _value; }
 
-            Utilities::Vec2F64& GetPosition() { return GetComponent<Utilities::Vec2F64, 0>(); }
-            const Utilities::Vec2F64& GetPosition() const { return GetComponent<Utilities::Vec2F64, 0>(); }
-            void SetPosition(const Utilities::Vec2F64& _value) { return SetComponent<Utilities::Vec2F64, 0>(_value); }
+            Vec2F64& GetPosition() { return GetComponent<Vec2F64, 0>(); }
+            const Vec2F64& GetPosition() const { return GetComponent<Vec2F64, 0>(); }
+            void SetPosition(const Vec2F64& _value) { return SetComponent<Vec2F64, 0>(_value); }
 
             const double& GetX() const { return GetPosition()[0]; };
             double& GetX() { return GetPosition()[0]; };
@@ -263,6 +264,24 @@ namespace rxd
 
         template<size_t N>
         using PixelShader = std::function<Utilities::Color(const Vertex<N>&)>;
+
+        template<typename V>
+        struct Mesh
+        {
+            typedef std::array<V*, 3> Triangle;
+
+            Mesh(std::vector<V>&& _vertices, const std::vector<std::array<size_t, 3>>& _triangleIndices) : vertices(_vertices), triangles(_vertices.size())
+            {
+                //TODO: Add checks that indices are valid
+                for (auto& indices : _triangleIndices)
+                    triangles.push_back({ &vertices[indices[0]], &vertices[indices[1]], &vertices[indices[2]] });
+            }
+
+            const std::vector<Triangle> GetTriangles() const { return triangles; }
+        private:
+            std::vector<V> vertices;
+            std::vector<Triangle> triangles;
+        };
 
         template<size_t N>
         class RasterizedEdge
@@ -286,67 +305,70 @@ namespace rxd
             const Vertex<N>& GetValue() const { return value; }
         };
 
-        // template<typename VSIn, RasterizableVertex PSIn>
-        // void Rasterize(Target* _target, const VSIn& _v1, const VSIn& _v2, VertexShader<VSIn, PSIn> _vs, PixelShader<PSIn> _ps)
-        // {
-        //     uint64_t targetWidth = _target->GetWidth(), targetHeight = _target->GetHeight();
+        template<size_t N>
+        void Rasterize(Target* _target, const Vertex<N>& _v1, const Vertex<N>& _v2, PixelShader<N> _ps)
+        {
+            // uint64_t targetWidth = _target->GetWidth(), targetHeight = _target->GetHeight();
 
-        //     PSIn left = _vs(_v1), right = _vs(_v2);
-        //     if (left.GetX() > right.GetX())
-        //         std::swap(left, right);
+            // Vertex<N>* left = _v1, * right = _v2;
+            // if (right->GetX() < left->GetX())
+            //     std::swap(left, right);
 
-        //     int64_t yStart = std::ceil(left.GetY() * targetHeight), yEnd = std::ceil(right.GetY() * targetHeight);
+            // int64_t yStart = std::ceil(left->GetY() * targetHeight), yEnd = std::ceil(right->GetY() * targetHeight);
 
-        //     if (yStart == yEnd) // Horizontal line
-        //     {
-        //         int64_t y = std::ceil(left.GetY() * targetHeight);
-        //         int64_t xStart = std::ceil(left.GetX() * targetWidth), xEnd = std::ceil(right.GetX() * targetWidth);
-        //         double scanLength = double(xEnd - xStart);
+            // if (yStart == yEnd) // Horizontal line
+            // {
+            //     int64_t y = std::ceil(left->GetY() * targetHeight);
+            //     int64_t xStart = std::ceil(left->GetX() * targetWidth), xEnd = std::ceil(right->GetX() * targetWidth);
+            //     auto scanLine = RasterizedEdge<N>(*left, *right, 1.0 / (xEnd - xStart));
 
-        //         for (int64_t x = xStart; x < xEnd; x++)
-        //             _target->SetPixel(x, y, _ps(PSIn::Lerp(left, right, (x - xStart) / scanLength)));
-        //     }
-        //     else
-        //     {
-        //         auto edge = RasterizedEdge<PSIn>(left, right, 1.0 / (yStart - yEnd));
-        //         double lastX = edge.GetValue().GetX(), distSquared = Utilities::Vec2F64::LengthSquared(right.GetPosition(), left.GetPosition());
+            //     for (int64_t x = xStart; x < xEnd; ++x)
+            //     {
+            //         _target->SetPixel(x, y, _ps(scanLine.GetValue()));
+            //         scanLine.Step();
+            //     }
+            // }
+            // else
+            // {
+            //     auto edge = RasterizedEdge<N>(left, right, 1.0 / (yStart - yEnd));
+            //     double lastX = edge.GetValue().GetX(), distSquared = LengthSquared(right->GetPosition(), left->GetPosition());
 
-        //         if (yStart < yEnd)
-        //         {
-        //             for (int64_t y = yStart; y < yEnd; y++)
-        //             {
-        //                 int64_t xStart = std::ceil(lastX * targetWidth);
-        //                 int64_t xEnd = std::max(xStart + 1, (int64_t)std::ceil(edge.GetValue().GetX() * targetWidth));
+            //     if (yStart < yEnd)
+            //     {
+            //         for (int64_t y = yStart; y < yEnd; ++y)
+            //         {
+            //             int64_t xStart = std::ceil(lastX * targetWidth);
+            //             int64_t xEnd = std::max(xStart + 1, (int64_t)std::ceil(edge.GetValue().GetX() * targetWidth));
 
-        //                 for (int64_t x = xStart; x < xEnd; x++)
-        //                 {
-        //                     double t = Utilities::Vec2F64::LengthSquared({ x / double(targetWidth), y / double(targetHeight) }, left.GetPosition()) / distSquared;
-        //                     _target->SetPixel(x, y, _ps(PSIn::Lerp(left, right, t)));
-        //                 }
+            //             for (int64_t x = xStart; x < xEnd; ++x)
+            //             {
+            //                 double t = LengthSquared(Vec2F64({ x / double(targetWidth), y / double(targetHeight) }), left->GetPosition()) / distSquared;
+            //                 _target->SetPixel(x, y, _ps(PSIn::Lerp(left, right, t)));
+            //             }
 
-        //                 lastX = edge.GetValue().GetX();
-        //                 edge.Step();
-        //             }
-        //         }
-        //         else
-        //         {
-        //             for (int64_t y = yStart; y > yEnd; y--)
-        //             {
-        //                 int64_t xStart = std::ceil(lastX * targetWidth);
-        //                 int64_t xEnd = std::max(xStart + 1, (int64_t)std::ceil(edge.GetValue().GetX() * targetWidth));
+            //             lastX = edge.GetValue().GetX();
+            //             edge.Step();
+            //         }
+            //     }
+            //     else
+            //     {
+            //         for (int64_t y = yStart; y > yEnd; --y)
+            //         {
+            //             int64_t xStart = std::ceil(lastX * targetWidth);
+            //             int64_t xEnd = std::max(xStart + 1, (int64_t)std::ceil(edge.GetValue().GetX() * targetWidth));
 
-        //                 for (int64_t x = xStart; x < xEnd; x++)
-        //                 {
-        //                     double t = Utilities::Vec2F64::LengthSquared({ x / double(targetWidth), y / double(targetHeight) }, left.GetPosition()) / distSquared;
-        //                     _target->SetPixel(x, y, _ps(PSIn::Lerp(left, right, t)));
-        //                 }
+            //             for (int64_t x = xStart; x < xEnd; ++x)
+            //             {
+            //                 double t = Vec2F64::LengthSquared({ x / double(targetWidth), y / double(targetHeight) }, left->GetPosition()) / distSquared;
+            //                 _target->SetPixel(x, y, _ps(PSIn::Lerp(left, right, t)));
+            //             }
 
-        //                 lastX = edge.GetValue().GetX();
-        //                 edge.Step();
-        //             }
-        //         }
-        //     }
-        // }
+            //             lastX = edge.GetValue().GetX();
+            //             edge.Step();
+            //         }
+            //     }
+            // }
+        }
 
         template<size_t N>
         void Rasterize(Target* _target, int64_t _yStart, int64_t _yEnd, RasterizedEdge<N>& _lEdge, RasterizedEdge<N>& _rEdge, PixelShader<N> _ps)
@@ -355,9 +377,13 @@ namespace rxd
 
             for (int64_t y = _yStart; y < _yEnd; ++y)
             {
-                const Vertex<N>& vLeft = _lEdge.GetValue(), & vRight = _rEdge.GetValue();
-                int64_t xStart = std::ceil((vLeft.GetX() + 0.5) * targetWidth), xEnd = std::ceil((vRight.GetX() + 0.5) * targetWidth);
-                auto scanLine = RasterizedEdge<N>(vLeft, vRight, 1.0 / (xEnd - xStart));
+                const Vertex<N>* vLeft = &_lEdge.GetValue(), * vRight = &_rEdge.GetValue();
+
+                if (vRight->GetX() < vLeft->GetX())
+                    std::swap(vLeft, vRight);
+
+                int64_t xStart = std::ceil((vLeft->GetX() + 0.5) * targetWidth), xEnd = std::ceil((vRight->GetX() + 0.5) * targetWidth);
+                auto scanLine = RasterizedEdge<N>(*vLeft, *vRight, 1.0 / (xEnd - xStart));
 
                 for (int64_t x = xStart; x < xEnd; x++)
                 {
@@ -409,27 +435,11 @@ namespace rxd
             }
         }
 
-        template<size_t N>
-        void Rasterize(Target* _target, const std::vector<Vertex<N>>& _vertices, PixelShader<N> _ps, bool _wireframe = false)
+        template<size_t VertexSize>
+        void Rasterize(Target* _target, const std::vector<std::array<Vertex<VertexSize>*, 3>>& _triangles, PixelShader<VertexSize> _ps, bool _wireframe = false)
         {
-            switch (_vertices.size())
-            {
-            case 0: break;
-            case 1:
-            {
-                auto& vertex = _vertices[0];
-                _target->SetPixel((vertex.GetX() + 0.5) * _target->GetWidth(), (vertex.GetY() + 0.5) * _target->GetHeight(), _ps(vertex));
-            } break;
-            case 2:
-            {
-                throw std::runtime_error("Not implemented for 2 vertices");
-            } break;
-            default:
-            {
-                for (auto it = _vertices.begin(); it != _vertices.end() - 2; ++it)
-                    Rasterize(_target, *it, *(it + 1), *(it + 2), _ps, _wireframe);
-            } break;
-            }
+            for (auto& triangle : _triangles)
+                Rasterize(_target, *triangle[0], *triangle[1], *triangle[2], _ps, _wireframe);
         }
     }
 }

@@ -171,7 +171,7 @@ namespace rxd
 #pragma region Window
     Window::Window(std::string _title, uint64_t _x, uint64_t _y, uint64_t _width, uint64_t _height)
     {
-        instance = SDL_CreateWindow(_title.c_str(), _x, _y, _width, _height, SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE);
+        instance = SDL_CreateWindow(_title.c_str(), _x, _y, _width, _height, SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
         CHECK_SDL(instance, "Could not create window!");
 
         renderer = SDL_CreateRenderer(instance, -1, SDL_RENDERER_ACCELERATED);
