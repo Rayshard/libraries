@@ -9,7 +9,7 @@ struct ColorVertex : public rxd::Renderer::Vertex<6>
         SetColor(_col);
     }
 
-    ColorVertex() : ColorVertex(rxd::Utilities::Vec2F64(), rxd::Utilities::Vec4F64(0, 0, 0, 1)) { }
+    ColorVertex() : ColorVertex(rxd::Utilities::Vec2F64(), rxd::Utilities::Vec4F64({ 0, 0, 0, 1 })) { }
 
     ColorVertex(const Vertex& _v) : Vertex(_v) { }
 
@@ -40,8 +40,8 @@ struct TextureVertex : public rxd::Renderer::Vertex<4>
         return [_texture](const TextureVertex& _v)
         {
             auto coords = _v.GetTexCoords();
-            int64_t x = std::ceil(coords.x * (_texture->GetWidth() - 1));
-            int64_t y = std::ceil(coords.y * (_texture->GetHeight() - 1));
+            int64_t x = std::ceil(coords[0] * (_texture->GetWidth() - 1));
+            int64_t y = std::ceil(coords[1] * (_texture->GetHeight() - 1));
             return _texture->GetPixel(x, y);
         };
     }
@@ -171,10 +171,10 @@ private:
         // auto v3 = ColorVertex({ 0.75, 0.75 }, Color::Blue().ToVec4F64());
         // auto v4 = ColorVertex({ 0.25, 0.75 }, Color::White().ToVec4F64());
 
-        auto v1 = TextureVertex({ 0.25, 0.25 }, { 0.0, 0.0 });
-        auto v2 = TextureVertex({ 0.75, 0.25 }, { 1.0, 0.0 });
-        auto v3 = TextureVertex({ 0.75, 0.75 }, { 1.0, 1.0 });
-        auto v4 = TextureVertex({ 0.25, 0.75 }, { 0.0, 1.0 });
+        auto v1 = TextureVertex(Vec2F64({ 0.25, 0.25 }), Vec2F64({ 0.0, 0.0 }));
+        auto v2 = TextureVertex(Vec2F64({ 0.75, 0.25 }), Vec2F64({ 1.0, 0.0 }));
+        auto v3 = TextureVertex(Vec2F64({ 0.75, 0.75 }), Vec2F64({ 1.0, 1.0 }));
+        auto v4 = TextureVertex(Vec2F64({ 0.25, 0.75 }), Vec2F64({ 0.0, 1.0 }));
 
 
         for (int i = 0; i < 1; i++)

@@ -6,8 +6,8 @@
 #include <thread>
 #include <tuple>
 #include <vector>
-#include <cmath>
 #include <concepts>
+#include "math.h"
 
 //TODO: Move to cpp file
 #define CHECK_SDL(value, message) do { if (!(value)) throw std::runtime_error(std::string(message) + " Error:\n" + SDL_GetError()); } while(false)
@@ -41,63 +41,18 @@ namespace rxd
 
     namespace Utilities
     {
-        template<typename T>
-        struct Vec2
-        {
-            T x, y;
-
-            Vec2(T _x = 0, T _y = 0) : x(_x), y(_y) { }
-
-            static double LengthSquared(const Vec2& _a, const Vec2& _b) { return (_b.x - _a.x) * (_b.x - _a.x) + (_b.y - _a.y) * (_b.y - _a.y); }
-            static double Length(const Vec2& _a, const Vec2& _b) { return std::sqrt(LengthSquared(_a, _b)); }
-            static Vec2 Lerp(const Vec2& _a, const Vec2& _b, double _amt) { return Vec2(_a.x + (_b.x - _a.x) * _amt, _a.y + (_b.y - _a.y) * _amt); }
-        };
-
-        template<typename T>
-        Vec2<T> operator-(const Vec2<T>& _left, const Vec2<T>& _right) { return Vec2<T>(_left.x - _right.x, _left.y - _right.y); }
-
-        template<typename T>
-        std::string ToString(Vec2<T> _v) { return "(" + std::to_string(_v.x) + ", " + std::to_string(_v.y) + ")"; }
-
-        template<typename T>
-        struct Vec4
-        {
-            T x, y, z, w;
-
-            Vec4(T _x = 0, T _y = 0, T _z = 0, T _w = 0) : x(_x), y(_y), z(_z), w(_w) { }
-
-            static Vec4 Lerp(const Vec4& _a, const Vec4& _b, double _amt)
-            {
-                T x = _a.x + (_b.x - _a.x) * _amt;
-                T y = _a.y + (_b.y - _a.y) * _amt;
-                T z = _a.z + (_b.z - _a.z) * _amt;
-                T w = _a.w + (_b.w - _a.w) * _amt;
-
-                return Vec4(x, y, z, w);
-            }
-        };
-
-        template<typename T>
-        Vec4<T> operator-(const Vec4<T>& _left, const Vec4<T>& _right) { return Vec4<T>(_left.x - _right.x, _left.y - _right.y, _left.z - _right.z, _left.w - _right.w); }
-
-        template<typename T>
-        std::string ToString(Vec4<T> _v) { return "(" + std::to_string(_v.x) + ", " + std::to_string(_v.y) + ", " + std::to_string(_v.z) + ", " + std::to_string(_v.w) + ")"; }
-
-        typedef Vec2<int64_t> Vec2I64;
-        typedef Vec2<double> Vec2F64;
-        typedef Vec4<int64_t> Vec4I64;
-        typedef Vec4<double> Vec4F64;
-
+        using namespace math;
+        
         struct Color
         {
             uint8_t a, r, g, b;
 
             Color(uint8_t _a, uint8_t _r, uint8_t _g, uint8_t _b) : a(_a), r(_r), g(_g), b(_b) { }
-            Color(Vec4F64 _v) : Color(_v.x * 255, _v.y * 255, _v.z * 255, _v.w * 255) { }
+            Color(Vec4F64 _v) : Color(_v[0] * 255, _v[1] * 255, _v[2] * 255, _v[3] * 255) { }
             Color(uint32_t _value) : Color((_value >> 24) & 255, (_value >> 16) & 255, (_value >> 8) & 255, _value & 255) { }
             Color() : Color(255, 0, 0, 0) { }
 
-            Vec4F64 ToVec4F64() { return { a / 255.0, r / 255.0, g / 255.0, b / 255.0 }; }
+            Vec4F64 ToVec4F64() { return Vec4F64({ a / 255.0, r / 255.0, g / 255.0, b / 255.0 }); }
 
             inline static Color Red() { return { 255, 255, 0, 0 }; }
             inline static Color Green() { return { 255, 0, 255, 0 }; }
@@ -292,13 +247,13 @@ namespace rxd
             const Utilities::Vec2F64& GetPosition() const { return GetComponent<Utilities::Vec2F64, 0>(); }
             void SetPosition(const Utilities::Vec2F64& _value) { return SetComponent<Utilities::Vec2F64, 0>(_value); }
 
-            const double& GetX() const { return GetPosition().x; };
-            double& GetX() { return GetPosition().x; };
-            void SetX(double _value) { GetPosition().x = _value; };
+            const double& GetX() const { return GetPosition()[0]; };
+            double& GetX() { return GetPosition()[0]; };
+            void SetX(double _value) { GetPosition()[0] = _value; };
 
-            const double& GetY() const { return GetPosition().y; };
-            double& GetY() { return GetPosition().y; };
-            void SetY(double _value) { GetPosition().y = _value; };
+            const double& GetY() const { return GetPosition()[1]; };
+            double& GetY() { return GetPosition()[1]; };
+            void SetY(double _value) { GetPosition()[1] = _value; };
 
         private:
             double components[N];
@@ -399,7 +354,7 @@ namespace rxd
         {
             uint64_t targetWidth = _target->GetWidth();
 
-            for (int64_t y = _yStart; y < _yEnd; y++)
+            for (int64_t y = _yStart; y < _yEnd; ++y)
             {
                 const Vertex<N>& vLeft = _lEdge.GetValue(), & vRight = _rEdge.GetValue();
                 int64_t xStart = std::ceil(vLeft.GetX() * targetWidth), xEnd = std::ceil(vRight.GetX() * targetWidth);
@@ -436,7 +391,7 @@ namespace rxd
             else
             {
                 auto topToBottom = bottom.GetPosition() - top.GetPosition(), topToMiddle = middle.GetPosition() - top.GetPosition();
-                bool rightHanded = topToMiddle.x * topToBottom.y - topToBottom.x * topToMiddle.y >= 0;
+                bool rightHanded = topToMiddle[0] * topToBottom[1] - topToBottom[0] * topToMiddle[1] >= 0;
 
                 uint64_t targetHeight = _target->GetHeight();
                 int64_t y = std::ceil(top.GetY() * targetHeight), yEnd1 = std::ceil(middle.GetY() * targetHeight), yEnd2 = std::ceil(bottom.GetY() * targetHeight);

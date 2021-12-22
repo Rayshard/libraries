@@ -25,6 +25,7 @@
         ✔ Digits() @done(21-12-02 23:32)
         ✔ AlphaNum() @done(21-12-02 23:32)
 ☐ c++/rxd
+    ☐ change screen coords to -1 to 1 on x and y
     ☐ take away vertex shader as parameter so that it isn't calculated multiple times per vertex if triangle share a vertex
     ☐ depth buffer
     ☐ perspective interpolation
