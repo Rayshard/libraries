@@ -38,7 +38,7 @@ int main()
     try
     {
         MyParser parser;
-        Named("MyParser", parser).Parse("123, World ,5.7");
+        Named("MyParser", parser).Parse("123, World , 5.7");
     }
     catch (const ParseError& e)
     {

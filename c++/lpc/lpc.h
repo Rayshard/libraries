@@ -236,7 +236,7 @@ namespace lpc
         };
 
         template<typename In, typename Out>
-        Parser<Out> Mapped(const Parser<In>& _parser, std::function<Out(const ParseResult<In>&)> _map)
+        Parser<Out> Mapped(const Parser<In>& _parser, std::function<Out(ParseResult<In>&)> _map)
         {
             return Parser<Out>([=](const Position& _pos, StringStream& _stream)
                 {
@@ -379,7 +379,7 @@ namespace lpc
             return Parser<T>([=](const Position& _pos, StringStream& _stream)
                 {
                     try { return _parser.Parse(_stream); }
-                    catch (const ParseError& e) { throw ParseError(ParseError(_stream.GetPosition(), "Unable to parse " + _name), e); }
+                    catch (const ParseError& e) { throw ParseError(ParseError(e.GetPosition(), "Unable to parse " + _name), e); }
                 });
         }
 
@@ -486,7 +486,15 @@ namespace lpc
                     }
                     catch (const ParseError& e) { result2 = e; }
 
-                    if (result1.index() == 1 && result2.index() == 1) { throw ParseError(_pos, "No option parsed!", { std::get<1>(result1), std::get<1>(result2) }); }
+                    if (result1.index() == 1 && result2.index() == 1)
+                    {
+                        ParseError& error1 = std::get<1>(result1), & error2 = std::get<1>(result2);
+                        size_t error1Length = _stream.GetOffset(error1.GetPosition()), error2Length = _stream.GetOffset(error2.GetPosition());
+
+                        if (error1Length == error2Length) { throw ParseError(_pos, "No option parsed!", { error1, error2 }); }
+                        else if (error1Length > error2Length) { throw error1; }
+                        else { throw error2; }
+                    }
                     else if (result1.index() == 0 && result2.index() == 1)
                     {
                         _stream.SetOffset(streamStart + result1Length);
@@ -529,7 +537,7 @@ namespace lpc
                 if (_min == 0)
                 {
                     OptionalParser<QuantifiedValue<T>> parser = Optional<QuantifiedValue<T>>(_parser + Quantified<T>(_sep >> _parser, 0, _max - 1));
-                    return Mapped<OptionalValue<QuantifiedValue<T>>, QuantifiedValue<T>>(parser, [](const OptionalResult<QuantifiedValue<T>>& _result)
+                    return Mapped<OptionalValue<QuantifiedValue<T>>, QuantifiedValue<T>>(parser, [](OptionalResult<QuantifiedValue<T>>& _result)
                         {
                             return _result.value.has_value() ? _result.value.value() : QuantifiedValue<T>();
                         });
