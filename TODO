@@ -27,7 +27,7 @@
 ☐ c++/rxd
     ✔ change screen coords to -1 to 1 on x and y @done(21-12-21 23:42)
     ✔ take away vertex shader as parameter so that it isn't calculated multiple times per vertex if triangle share a vertex @done(21-12-21 23:54)
-    ☐ take away template from vertex?
+    ✔ take away template from vertex? @done(21-12-22 12:54)
     ☐ depth buffer
     ☐ perspective interpolation
     ☐ threading: send mesh (ptr) to a thread to have vertex shader applied to all vertices, then when it's finished, have it send the mesh (ptr) to a queue on the main thread to be rendered
