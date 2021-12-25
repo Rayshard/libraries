@@ -7,6 +7,7 @@
 #include <set>
 #include <functional>
 #include <cassert>
+#include <deque>
 
 namespace lpc
 {
@@ -67,6 +68,9 @@ namespace lpc
         const std::string& GetString() const;
     };
 
+    template<typename T>
+    struct Parser;
+
     class Lexer
     {
     public:
@@ -99,7 +103,7 @@ namespace lpc
 
     private:
         std::vector<Pattern> patterns;
-        std::unordered_map<PatternID, Pattern*> patternsMap;
+        std::unordered_map<PatternID, size_t> patternsMap;
         Pattern patternEOS, patternUnknown;
 
     public:
@@ -112,6 +116,8 @@ namespace lpc
 
         const Pattern& GetPattern(const PatternID& _id) const;
         bool HasPattern(const PatternID& _id) const;
+
+        Parser<std::string> CreateLexeme(const PatternID& _id, const std::set<PatternID>& _ignores = { }, std::optional<std::string> _value = std::nullopt) const;
 
         static void OnLexUnknown(StringStream& _stream, const Lexer::Token& _token) { throw std::runtime_error("Unrecognized token: '" + _token.value + "' at " + _token.position.ToString()); }
     };
@@ -133,7 +139,7 @@ namespace lpc
             trace.push_back(_e2);
         }
 
-        ParseError(Position _pos, const std::string& _msg, std::initializer_list<ParseError> _trace)
+        ParseError(Position _pos, const std::string& _msg, const std::vector<ParseError>& _trace)
             : ParseError(_pos, _msg)
         {
             trace.insert(trace.end(), _trace.begin(), _trace.end());
@@ -146,7 +152,7 @@ namespace lpc
         {
             std::string traceMessage;
 
-            for (auto& e : trace)
+            for (const ParseError& e : trace)
                 traceMessage += "\n" + std::regex_replace(e.GetMessageWithTrace(), std::regex("\\n"), "\n\t");
 
             return what() + traceMessage;
@@ -194,7 +200,7 @@ namespace lpc
 
         Result Parse(StringStream& _stream) const
         {
-            auto streamStart = _stream.GetOffset();
+            size_t streamStart = _stream.GetOffset();
 
             try { return function(_stream.GetPosition(), _stream); }
             catch (const ParseError& e)
@@ -214,8 +220,26 @@ namespace lpc
     template<typename T>
     struct IParser : public Parser<T>
     {
-        IParser() : Parser<T>([this](auto _pos, auto _stream) { return OnParse(_pos, _stream); }) { }
+        IParser() : Parser<T>([this](const Position& _pos, StringStream& _stream) { return OnParse(_pos, _stream); }) { }
         virtual ~IParser() { }
+
+    protected:
+        virtual Parser<T>::Result OnParse(const Position& _pos, StringStream& _stream) = 0;
+    };
+
+    template<typename T>
+    class LPC : public IParser<T>, protected Lexer
+    {
+    protected:
+        std::set<Lexer::PatternID> ignores;
+
+    public:
+        LPC(Lexer::Action _onLexEOS = std::monostate(), Lexer::Action _onLexUnknown = Lexer::OnLexUnknown) : Lexer(_onLexEOS, _onLexUnknown), ignores() { }
+
+        virtual ~LPC() { }
+
+        const Lexer& GetLexer() const { return *this; }
+        const std::set<Lexer::PatternID>& GetIgnores() const { return ignores; }
 
     protected:
         virtual Parser<T>::Result OnParse(const Position& _pos, StringStream& _stream) = 0;
@@ -256,7 +280,7 @@ namespace lpc
         {
             return Parser<T>([=](const Position& _pos, StringStream& _stream)
                 {
-                    auto result = _parser.Parse(_stream);
+                    ParseResult<T> result = _parser.Parse(_stream);
 
                     if (_predicate(result)) { return result; }
                     else { throw _onFail ? _onFail(result) : ParseResult(_pos, "Predicate not satisfied!"); }
@@ -293,6 +317,40 @@ namespace lpc
                 });
         }
 
+#pragma region Try
+        template<typename T>
+        using TryValue = std::variant<T, ParseError>;
+
+        template<typename T>
+        using TryResult = ParseResult<TryValue<T>>;
+
+        template<typename T>
+        class TryParser : public IParser<TryValue<T>>
+        {
+            Parser<T> parser;
+
+        public:
+            TryParser(const Parser<T>& _parser) : parser(_parser) {}
+
+            static bool IsSuccess(TryValue<T>& _value) { return _value.index() == 0; }
+            static bool IsError(TryValue<T>& _value) { return _value.index() == 1; }
+
+            static T* ExtractSuccess(TryValue<T>& _value) { return std::get_if<std::variant_alternative_t<0, TryValue<T>>>(&_value); }
+            static ParseError* ExtractError(TryValue<T>& _value) { return std::get_if<std::variant_alternative_t<1, TryValue<T>>>(&_value); }
+
+        protected:
+            TryResult<T> OnParse(const Position& _pos, StringStream& _stream) override
+            {
+                try
+                {
+                    ParseResult<T> result = parser.Parse(_stream);
+                    return TryResult<T>(result.position, result.value);
+                }
+                catch (const ParseError& e) { return TryResult<T>(e.GetPosition(), e); }
+            }
+        };
+#pragma endregion
+
 #pragma region Quantified
         template<typename T>
         using QuantifiedValue = std::vector<ParseResult<T>>;
@@ -322,7 +380,7 @@ namespace lpc
                                 if (results.size() >= _min)
                                     break;
 
-                                auto error = ParseError::Expectation("at least " + std::to_string(_min), "only " + std::to_string(results.size()), _stream.GetPosition());
+                                ParseError error = ParseError::Expectation("at least " + std::to_string(_min), "only " + std::to_string(results.size()), _stream.GetPosition());
                                 throw ParseError(e, error);
                             }
                         }
@@ -346,6 +404,44 @@ namespace lpc
         QuantifiedParser<T> Exactly(const Parser<T>& _parser, size_t _n) { return Quantified<T>(_parser, _n, _n); }
 #pragma endregion
 
+#pragma region List
+        template<typename... Ts>
+        using ListValue = std::tuple<ParseResult<Ts>...>;
+
+        template<typename... Ts>
+        using ListResult = ParseResult<ListValue<Ts...>>;
+
+        template<typename... Ts>
+        class List : public IParser<ListValue<Ts...>>
+        {
+            std::tuple<Parser<Ts>...> parsers;
+
+        public:
+            List(const std::tuple<Parser<Ts>...>& _parsers) : parsers(_parsers) {}
+
+            const std::tuple<Parser<Ts>...> GetParsers() const { return parsers; }
+
+        protected:
+            ListResult<Ts...> OnParse(const Position& _pos, StringStream& _stream) override
+            {
+                auto results = std::apply([&](auto &&... _args) { return std::tuple<ParseResult<Ts>...>{_args.Parse(_stream)...}; }, parsers);
+                return ListResult<Ts...>(sizeof...(Ts) == 0 ? _pos : std::get<0>(results).position, results);
+            }
+        };
+
+        template<typename First, typename Second>
+        List<First, Second> operator&(const Parser<First>& _first, const Parser<Second>& _second) { return List<First, Second>({ _first, _second }); }
+
+        template<typename... Head, typename Appendage>
+        List<Head..., Appendage> operator&(const List<Head...>& _head, const Parser<Appendage>& _appendage) { return List<Head..., Appendage>(std::tuple_cat(_head.GetParsers(), std::tuple<Parser<Appendage>>{ _appendage })); }
+
+        template<typename Appendage, typename... Tail>
+        List<Appendage, Tail...> operator&(const Parser<Appendage>& _appendage, const List<Tail...>& _tail) { return List<Appendage, Tail...>(std::tuple_cat(std::tuple<Parser<Appendage>>{ _appendage }, _tail.GetParsers())); }
+
+        template<typename... Head, typename... Tail>
+        List<Head..., Tail...> operator&(const List<Head...>& _head, const List<Tail...>& _tail) { return List<Head..., Tail...>(std::tuple_cat(_head.GetParsers(), _tail.GetParsers())); }
+#pragma endregion
+
 #pragma region Optional
         template<typename T>
         using OptionalValue = std::optional<T>;
@@ -365,12 +461,98 @@ namespace lpc
 
                     try
                     {
-                        auto result = _parser.Parse(_stream);
+                        ParseResult<T> result = _parser.Parse(_stream);
                         return OptionalResult<T>(result.position, result.value);
                     }
                     catch (const ParseError& e) { return OptionalResult<T>(_pos, std::nullopt); }
                 });
         }
+#pragma endregion
+
+#pragma region BinopChain
+        enum class BinopAssociativity { RIGHT, LEFT, NONE };
+
+        template<typename ID>
+        struct Binop
+        {
+            ID id;
+            size_t precedence;
+            BinopAssociativity associatvity;
+        };
+
+        template<typename T, typename B>
+        using BinopChainCombiner = std::function<ParseResult<T>(const ParseResult<T>& _lhs, const ParseResult<Binop<B>>& _op, const ParseResult<T>& _rhs)>;
+
+        template<typename T, typename B>
+        ParseResult<T> BinopChainFunc(StringStream& _stream, const Parser<T>& _atom, const Parser<Binop<B>>& _op, BinopChainCombiner<T, B> _bcc, size_t _curPrecedence)
+        {
+            ParseResult<T> chain = _atom.Parse(_stream);
+
+            while (true)
+            {
+                size_t streamStart = _stream.GetOffset();
+                ParseResult<Binop<B>> op;
+
+                try { op = _op.Parse(_stream); }
+                catch (const ParseError& e) { break; }
+
+                if (op.value.precedence < _curPrecedence)
+                {
+                    _stream.SetOffset(streamStart);
+                    break;
+                }
+
+                ParseResult<T> rhs = BinopChainFunc(_stream, _atom, _op, _bcc, op.value.precedence + (op.value.associatvity == BinopAssociativity::RIGHT ? 0 : 1));
+                chain = _bcc(chain, op, rhs);
+            }
+
+            return chain;
+        }
+
+        template<typename T, typename B>
+        Parser<T> BinopChain(const Parser<T>& _atom, const Parser<Binop<B>>& _op, BinopChainCombiner<T, B> _bcc)
+        {
+            return Parser<T>([=](const Position& _pos, StringStream& _stream) { return BinopChainFunc(_stream, _atom, _op, _bcc, 0); });
+        }
+#pragma endregion
+
+#pragma region Fold
+        template<typename T, typename F>
+        Parser<F> Fold(const Parser<T>& _parser, const F& _initial, std::function<void(F&, const ParseResult<T>&)> _func, bool _left)
+        {
+            return Parser<F>([=](const Position& _pos, StringStream& _stream)
+                {
+                    F value = _initial;
+                    std::deque<ParseResult<T>> queue;
+
+                    //Accumulate elements
+                    while (true)
+                    {
+                        try { queue.push_back(_parser.Parse(_stream)); }
+                        catch (const ParseError& e) { break; }
+                    }
+
+                    //Fold
+                    if (_left)
+                    {
+                        while (!queue.empty())
+                            _func(value, queue.pop_front());
+                    }
+                    else
+                    {
+                        while (!queue.empty())
+                            _func(value, queue.pop_back());
+                    }
+
+                    return ParseResult<F>(_pos, value);
+                });
+        }
+
+        template<typename T>
+        Parser<T> FoldL(const Parser<T>& _parser, const T& _initial, std::function<void(T&, const ParseResult<T>&)> _func) { return Fold<T, T>(_parser, _initial, _func, true); }
+
+        template<typename T>
+        Parser<T> FoldR(const Parser<T>& _parser, const T& _initial, std::function<void(T&, const ParseResult<T>&)> _func) { return Fold<T, T>(_parser, _initial, _func, false); }
 #pragma endregion
 
         template<typename T>
@@ -398,7 +580,7 @@ namespace lpc
         {
             return Parser<T>([=](const Position& _pos, StringStream& _stream)
                 {
-                    auto result = _parser.Parse(_stream);
+                    ParseResult<T> result = _parser.Parse(_stream);
                     _suffix.Parse(_stream);
                     return result;
                 });
@@ -462,61 +644,217 @@ namespace lpc
                 });
         }
 
+#pragma region Choice
         template<typename T>
-        Parser<T> operator|(const Parser<T>& _option1, const Parser<T>& _option2)
+        class Longest : public IParser<T>
         {
-            return Parser<T>([=](const Position& _pos, StringStream& _stream)
-                {
-                    size_t streamStart = _stream.GetOffset(), result1Length = 0, result2Length = 0;
-                    std::variant<ParseResult<T>, ParseError> result1, result2;
+            std::vector<Parser<T>> parsers;
 
+        public:
+            Longest(const std::vector<Parser<T>>& _parsers) : parsers(_parsers) {}
+
+            const std::vector<Parser<T>> GetParsers() const { return parsers; }
+
+        protected:
+            ParseResult<T> OnParse(const Position& _pos, StringStream& _stream) override
+            {
+                size_t streamStart = _stream.GetOffset(), greatestLength = 0;
+                std::optional<ParseResult<T>> result;
+                std::vector<ParseError> errors;
+
+                for (Parser<T>& parser : parsers)
+                {
                     try
                     {
-                        result1 = _option1.Parse(_stream);
-                        result1Length = _stream.GetOffset() - streamStart;
+                        ParseResult<T> parseResult = parser.Parse(_stream);
+                        size_t length = _stream.GetOffset() - streamStart;
+
+                        if (!result.has_value() || length > greatestLength)
+                        {
+                            result = parseResult;
+                            greatestLength = length;
+                            errors.clear(); //We put this here to save memory
+                        }
                     }
-                    catch (const ParseError& e) { result1 = e; }
+                    catch (const ParseError& e)
+                    {
+                        if (!result.has_value())
+                        {
+                            size_t eLength = _stream.GetOffset(e.GetPosition());
+                            size_t errorsLength = errors.empty() ? 0 : _stream.GetOffset(errors.back().GetPosition());
+
+                            if (eLength == errorsLength) { errors.push_back(e); }
+                            else if (eLength > errorsLength) { errors = { e }; }
+                        }
+                    }
 
                     _stream.SetOffset(streamStart);
+                }
 
-                    try
-                    {
-                        result2 = _option2.Parse(_stream);
-                        result2Length = _stream.GetOffset() - streamStart;
-                    }
-                    catch (const ParseError& e) { result2 = e; }
+                if (!result.has_value())
+                    throw errors.size() == 1 ? errors.back() : ParseError(_pos, "No option parsed!", errors);
 
-                    if (result1.index() == 1 && result2.index() == 1)
-                    {
-                        ParseError& error1 = std::get<1>(result1), & error2 = std::get<1>(result2);
-                        size_t error1Length = _stream.GetOffset(error1.GetPosition()), error2Length = _stream.GetOffset(error2.GetPosition());
+                _stream.SetOffset(streamStart + greatestLength);
+                return result.value();
+            }
+        };
 
-                        if (error1Length == error2Length) { throw ParseError(_pos, "No option parsed!", { error1, error2 }); }
-                        else if (error1Length > error2Length) { throw error1; }
-                        else { throw error2; }
-                    }
-                    else if (result1.index() == 0 && result2.index() == 1)
-                    {
-                        _stream.SetOffset(streamStart + result1Length);
-                        return std::get<0>(result1);
-                    }
-                    else if (result2.index() == 0 && result1.index() == 1)
-                    {
-                        _stream.SetOffset(streamStart + result2Length);
-                        return std::get<0>(result2);
-                    }
-                    else if (result1Length >= result2Length)
-                    {
-                        _stream.SetOffset(streamStart + result1Length);
-                        return std::get<0>(result1);
-                    }
-                    else
-                    {
-                        _stream.SetOffset(streamStart + result2Length);
-                        return std::get<0>(result2);
-                    }
-                });
+        template<typename T>
+        Longest<T> operator|(const Parser<T>& _option1, const Parser<T>& _option2) { return Longest<T>({ _option1, _option2 }); }
+
+        template<typename T>
+        Longest<T> operator|(const Longest<T>& _firstOptions, const Parser<T>& _lastOption)
+        {
+            std::vector<Parser<T>> options = _firstOptions.GetParsers();
+            options.push_back(_lastOption);
+            return Longest<T>(std::move(options));
         }
+
+        template<typename T>
+        Longest<T> operator|(const Parser<T>& _firstOption, const Longest<T>& _lastOptions)
+        {
+            std::vector<Parser<T>> options = {_firstOption};
+            const std::vector<Parser<T>>& lastParsers = _lastOptions.GetParsers();
+
+            options.insert(options.end(), lastParsers.begin(), lastParsers.end());
+            return Longest<T>(std::move(options));
+        }
+
+        template<typename T>
+        Longest<T> operator|(const Longest<T>& _firstOptions, const Longest<T>& _lastOptions)
+        {
+            std::vector<Parser<T>> options = _firstOptions.GetParsers();
+            const std::vector<Parser<T>>& lastParsers = _lastOptions.GetParsers();
+            
+            options.insert(options.end(), lastParsers.begin(), lastParsers.end());
+            return Longest<T>(std::move(options));
+        }
+
+        template<typename T>
+        class FirstSuccess : public IParser<T>
+        {
+            std::vector<Parser<T>> parsers;
+
+        public:
+            FirstSuccess(const std::vector<Parser<T>>& _parsers) : parsers(_parsers) {}
+
+            const std::vector<Parser<T>> GetParsers() const { return parsers; }
+
+        protected:
+            ParseResult<T> OnParse(const Position& _pos, StringStream& _stream) override
+            {
+                size_t streamStart = _stream.GetOffset();
+                std::vector<ParseError> errors;
+
+                for (Parser<T>& parser : parsers)
+                {
+                    try { return parser.Parse(_stream); }
+                    catch (const ParseError& e)
+                    {
+                        size_t eLength = _stream.GetOffset(e.GetPosition());
+                        size_t errorsLength = errors.empty() ? 0 : _stream.GetOffset(errors.back().GetPosition());
+
+                        if (eLength == errorsLength) { errors.push_back(e); }
+                        else if (eLength > errorsLength) { errors = { e }; }
+                    }
+
+                    _stream.SetOffset(streamStart);
+                }
+
+                throw errors.size() == 1 ? errors.back() : ParseError(_pos, "No option parsed!", errors);
+            }
+        };
+
+        template<typename T>
+        FirstSuccess<T> operator||(const Parser<T>& _option1, const Parser<T>& _option2) { return FirstSuccess<T>({ _option1, _option2 }); }
+
+        template<typename T>
+        FirstSuccess<T> operator||(const FirstSuccess<T>& _firstOptions, const Parser<T>& _lastOption)
+        {
+            std::vector<Parser<T>> options = _firstOptions.GetParsers();
+            options.push_back(_lastOption);
+            return FirstSuccess<T>(std::move(options));
+        }
+
+        template<typename T>
+        FirstSuccess<T> operator||(const Parser<T>& _firstOption, const FirstSuccess<T>& _lastOptions)
+        {
+            std::vector<Parser<T>> options = {_firstOption};
+            const std::vector<Parser<T>>& lastParsers = _lastOptions.GetParsers();
+
+            options.insert(options.end(), lastParsers.begin(), lastParsers.end());
+            return FirstSuccess<T>(std::move(options));
+        }
+
+        template<typename T>
+        FirstSuccess<T> operator||(const FirstSuccess<T>& _firstOptions, const FirstSuccess<T>& _lastOptions)
+        {
+            std::vector<Parser<T>> options = _firstOptions.GetParsers();
+            const std::vector<Parser<T>>& lastParsers = _lastOptions.GetParsers();
+            
+            options.insert(options.end(), lastParsers.begin(), lastParsers.end());
+            return FirstSuccess<T>(std::move(options));
+        }
+#pragma endregion
+
+#pragma region Variant
+        template <typename... TRest>
+        struct unique_types;
+
+        template <typename T1, typename T2, typename... TRest>
+            requires (!std::is_same_v<T1, T2>)
+        struct unique_types<T1, T2, TRest...>
+            : unique_types<T1, TRest...>, unique_types<T2, TRest ...> {};
+
+        template <typename T1, typename T2>
+        struct unique_types<T1, T2> : std::integral_constant<bool, !std::is_same_v<T1, T2>> { };
+
+        template <typename T>
+        struct unique_types<T> : std::integral_constant<bool, true> { };
+
+        template<typename... Ts>
+            requires (unique_types<Ts...>::value)
+        using VariantValue = std::variant<ParseResult<Ts>...>;
+
+        template<typename... Ts>
+            requires (unique_types<Ts...>::value)
+        using VariantResult = ParseResult<VariantValue<Ts...>>;
+
+        template<typename... Ts>
+            requires (unique_types<Ts...>::value)
+        class VariantParser : public IParser<VariantValue<Ts...>>
+        {
+            Parser<VariantValue<Ts...>> parser;
+
+            VariantParser(const Parser<VariantValue<Ts...>>& _parser) : parser(_parser) {}
+
+            template<typename T, std::size_t Idx = sizeof...(Ts) - 1>
+                requires (std::is_same_v<T, Ts> || ...)
+            static constexpr std::size_t GetIndex()
+            {
+                if constexpr (Idx == 0 || std::is_same_v<std::variant_alternative_t<Idx, std::variant<Ts...>>, T>) { return Idx; }
+                else { return GetIndex<T, Idx - 1>(); }
+            }
+
+        public:
+            template<typename T>
+                requires (std::is_same_v<T, Ts> || ...)
+            static VariantParser<Ts...> Create(const Parser<T>& _parser)
+            {
+                return Mapped<T, VariantValue<Ts...>>(_parser, [](ParseResult<T>& _result)
+                    {
+                        return VariantValue<Ts...>(std::in_place_index<GetIndex<T>()>, _result);
+                    });
+            }
+
+            template<typename T>
+                requires (std::is_same_v<T, Ts> || ...)
+            static ParseResult<T>* Extract(VariantValue<Ts...>& _value) { return std::get_if<std::variant_alternative_t<GetIndex<T>(), VariantValue<Ts...>>>(&_value); }
+
+        protected:
+            VariantResult<Ts...> OnParse(const Position& _pos, StringStream& _stream) override { return parser.Parse(_stream); }
+        };
+#pragma endregion
 
         template<typename T>
         Parser<T> Value(const T& _value) { return Parser<T>([=](const Position& _pos, StringStream& _stream) { return ParseResult<T>(_pos, _value); }); }
@@ -551,7 +889,7 @@ namespace lpc
         {
             return Parser<T>([=](const Position& _pos, StringStream& _stream)
                 {
-                    auto result = _parser.Parse(_stream);
+                    ParseResult<T> result = _parser.Parse(_stream);
 
                     _stream.SetPosition(_pos);
                     return result;
@@ -561,8 +899,8 @@ namespace lpc
         template<typename Prefix, typename T, typename Suffix>
         Parser<T> Between(const Parser<Prefix>& _prefix, const Parser<T>& _parser, const Parser<Suffix>& _suffix) { return _prefix >> _parser << _suffix; }
 
-        Parser<std::string> Token(const Lexer& _lexer, const Lexer::PatternID& _id, const std::set<Lexer::PatternID>& _ignores = {}, std::optional<std::string> _value = std::nullopt);
-        Parser<std::string> Token(const Regex& _regex, std::optional<std::string> _value = std::nullopt);
+        Parser<std::string> Lexeme(const Lexer& _lexer, const Lexer::PatternID& _id, const std::set<Lexer::PatternID>& _ignores = {}, std::optional<std::string> _value = std::nullopt);
+        Parser<std::string> Lexeme(const Regex& _regex, std::optional<std::string> _value = std::nullopt);
         Parser<std::string> Chars(std::optional<std::string> _value = std::nullopt);
         Parser<std::string> Letters(std::optional<std::string> _value = std::nullopt);
         Parser<std::string> Digits(std::optional<std::string> _value = std::nullopt);
