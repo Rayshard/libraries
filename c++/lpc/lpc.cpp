@@ -194,19 +194,14 @@ namespace lpc
 #pragma endregion
 
 #pragma region ParseError
-    ParseError::ParseError(Position _pos, const std::string& _msg)
-        : std::runtime_error("Error @ " + _pos.ToString() + ": " + _msg), position(_pos), message(_msg), trace() { }
+    ParseError::ParseError(Position _pos, const std::string& _msg, const std::vector<ParseError>& _trace)
+        : std::runtime_error("Error @ " + _pos.ToString() + ": " + _msg), position(_pos), message(_msg), trace(_trace) { }
 
     ParseError::ParseError(const ParseError& _e1, const ParseError& _e2)
         : ParseError(_e1.position, _e1.message)
     {
         trace.insert(trace.end(), _e1.trace.begin(), _e1.trace.end());
         trace.push_back(_e2);
-    }
-
-    ParseError::ParseError(Position _pos, const std::string& _msg, const std::vector<ParseError>& _trace)
-        : ParseError(_pos, _msg) {
-        trace.insert(trace.end(), _trace.begin(), _trace.end());
     }
 
     ParseError::ParseError() : ParseError(Position(), "") { }
@@ -276,7 +271,7 @@ namespace lpc
                 });
         }
 
-        Parser<std::string> Chars(std::optional<std::string> _value) { return Lexeme(Regex("[\\S\\s]"), _value); }
+        Parser<std::string> Chars(std::optional<std::string> _value) { return Lexeme(Regex("[\\S\\s]+"), _value); }
         Parser<std::string> Letters(std::optional<std::string> _value) { return Lexeme(Regex("[a-zA-Z]+"), _value); }
         Parser<std::string> Digits(std::optional<std::string> _value) { return Lexeme(Regex("[0-9]+"), _value); }
         Parser<std::string> AlphaNums(std::optional<std::string> _value) { return Lexeme(Regex("[a-zA-Z0-9]+"), _value); }

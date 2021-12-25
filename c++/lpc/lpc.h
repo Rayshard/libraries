@@ -130,9 +130,8 @@ namespace lpc
 
     public:
         ParseError();
-        ParseError(Position _pos, const std::string& _msg);
+        ParseError(Position _pos, const std::string& _msg, const std::vector<ParseError>& _trace = { });
         ParseError(const ParseError& _e1, const ParseError& _e2);
-        ParseError(Position _pos, const std::string& _msg, const std::vector<ParseError>& _trace);
 
         std::string GetMessageWithTrace() const;
 
