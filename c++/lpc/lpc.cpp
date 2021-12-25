@@ -275,13 +275,19 @@ namespace lpc
         Parser<std::string> Letters(std::optional<std::string> _value) { return Lexeme(Regex("[a-zA-Z]+"), _value); }
         Parser<std::string> Digits(std::optional<std::string> _value) { return Lexeme(Regex("[0-9]+"), _value); }
         Parser<std::string> AlphaNums(std::optional<std::string> _value) { return Lexeme(Regex("[a-zA-Z0-9]+"), _value); }
-        Parser<std::string> Whitespace(std::optional<std::string> _value) { return Lexeme(Regex("\\s+"), _value); }
-
-        Parser<char> Char(std::optional<char> _value)
+        Parser<std::string> Whitespaces(std::optional<std::string> _value) { return Lexeme(Regex("\\s+"), _value); }
+        
+        Parser<char> Char(const Regex& _regex, std::optional<char> _value)
         {
             std::optional<std::string> value = _value.has_value() ? std::optional(std::string(1, _value.value())) : std::nullopt;
-            return Mapped<std::string, char>(Lexeme(Regex("[\\S\\s]"), value), [](const ParseResult<std::string>& _result) { return _result.value[0]; });
+            return Mapped<std::string, char>(Lexeme(_regex, value), [](const ParseResult<std::string>& _result) { return _result.value[0]; });
         }
+
+        Parser<char> Letter(std::optional<char> _value) { return Char(Regex("[a-zA-Z]"), _value); }
+        Parser<char> Digit(std::optional<char> _value) { return Char(Regex("[0-9]"), _value); }
+        Parser<char> AlphaNum(std::optional<char> _value) { return Char(Regex("[a-zA-Z0-9]"), _value); }
+        Parser<char> Whitespace(std::optional<char> _value) { return Char(Regex("\\s"), _value); }
+        Parser<char> Char(std::optional<char> _value) { return Char(Regex("\\S\\s]"), _value); }
 
         Parser<std::monostate> EOS()
         {

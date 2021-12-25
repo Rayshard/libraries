@@ -875,12 +875,16 @@ namespace lpc
 
         Parser<std::string> Lexeme(const Lexer& _lexer, const Lexer::PatternID& _id, const std::set<Lexer::PatternID>& _ignores = {}, std::optional<std::string> _value = std::nullopt);
         Parser<std::string> Lexeme(const Regex& _regex, std::optional<std::string> _value = std::nullopt);
-        Parser<std::string> Chars(std::optional<std::string> _value = std::nullopt);
-        Parser<std::string> Letters(std::optional<std::string> _value = std::nullopt);
-        Parser<std::string> Digits(std::optional<std::string> _value = std::nullopt);
-        Parser<std::string> AlphaNums(std::optional<std::string> _value = std::nullopt);
-        Parser<std::string> Whitespace(std::optional<std::string> _value = std::nullopt);
         Parser<char> Char(std::optional<char> _value = std::nullopt);
+        Parser<std::string> Chars(std::optional<std::string> _value = std::nullopt);
+        Parser<char> Letter(std::optional<char> _value = std::nullopt);
+        Parser<std::string> Letters(std::optional<std::string> _value = std::nullopt);
+        Parser<char> Digit(std::optional<char> _value = std::nullopt);
+        Parser<std::string> Digits(std::optional<std::string> _value = std::nullopt);
+        Parser<char> AlphaNum(std::optional<char> _value = std::nullopt);
+        Parser<std::string> AlphaNums(std::optional<std::string> _value = std::nullopt);
+        Parser<char> Whitespace(std::optional<std::string> _value = std::nullopt);
+        Parser<std::string> Whitespaces(std::optional<std::string> _value = std::nullopt);
         Parser<std::monostate> EOS();
         Parser<std::monostate> Error(const std::string& _message);
     }
