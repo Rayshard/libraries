@@ -19,12 +19,12 @@ struct MyParser : public LPC<std::monostate>
     }
 
     Parser<std::string> ID() { return Named("ID", CreateLexeme("ID", ignores)); }
-    Parser<int> INTEGER() { return Named("INTEGER", Mapped<std::string, int>(CreateLexeme("INTEGER", ignores), [](ParseResult<std::string>& _result) { return std::stoi(_result.value); })); }
-    Parser<double> DECIMAL() { return Named("DECIMAL", Mapped<std::string, double>(CreateLexeme("DECIMAL", ignores), [](ParseResult<std::string>& _result) { return std::stod(_result.value); })); }
-    Parser<std::monostate> COMMA() { return Named("COMMA", Mapped<std::string, std::monostate>(CreateLexeme("SYMBOL", ignores, ","), [](ParseResult<std::string>& _result) { return std::monostate(); })); }
+    Parser<int> INTEGER() { return Named("INTEGER", Map<std::string, int>(CreateLexeme("INTEGER", ignores), [](ParseResult<std::string>& _result) { return std::stoi(_result.value); })); }
+    Parser<double> DECIMAL() { return Named("DECIMAL", Map<std::string, double>(CreateLexeme("DECIMAL", ignores), [](ParseResult<std::string>& _result) { return std::stod(_result.value); })); }
+    Parser<std::monostate> COMMA() { return Named("COMMA", Map<std::string, std::monostate>(CreateLexeme("SYMBOL", ignores, ","), [](ParseResult<std::string>& _result) { return std::monostate(); })); }
 
 protected:
-    Result OnParse(const Position& _pos, StringStream& _stream) override
+    ParseResult<std::monostate> OnParse(const Position& _pos, StringStream& _stream) override
     {
         //typedef VariantParser<std::string, int, double> Element;
 
@@ -43,7 +43,7 @@ protected:
 
         auto element = (CreateLexeme("ID", ignores) || CreateLexeme("DECIMAL", ignores) || CreateLexeme("INTEGER", ignores)).Parse(_stream).value;
         std::cout << element << std::endl;
-        return Result(_pos, std::monostate());
+        return ParseResult<std::monostate>(_pos, std::monostate());
     }
 };
 
@@ -51,7 +51,7 @@ int main()
 {
     try
     {
-        std::ifstream file("lpc/test.txt");
+        std::ifstream file("lpc/test.json");
         MyParser parser;
         Named("MyParser", parser).Parse(IStreamToString(file));
     }
