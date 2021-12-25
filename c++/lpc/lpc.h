@@ -119,7 +119,7 @@ namespace lpc
 
         Parser<std::string> CreateLexeme(const PatternID& _id, const std::set<PatternID>& _ignores = { }, std::optional<std::string> _value = std::nullopt) const;
 
-        static void OnLexUnknown(StringStream& _stream, const Lexer::Token& _token) { throw std::runtime_error("Unrecognized token: '" + _token.value + "' at " + _token.position.ToString()); }
+        static void OnLexUnknown(StringStream& _stream, const Lexer::Token& _token);
     };
 
     class ParseError : public std::runtime_error
@@ -129,43 +129,18 @@ namespace lpc
         std::vector<ParseError> trace;
 
     public:
-        ParseError(Position _pos, const std::string& _msg)
-            : std::runtime_error("Error @ " + _pos.ToString() + ": " + _msg), position(_pos), message(_msg), trace() { }
+        ParseError();
+        ParseError(Position _pos, const std::string& _msg);
+        ParseError(const ParseError& _e1, const ParseError& _e2);
+        ParseError(Position _pos, const std::string& _msg, const std::vector<ParseError>& _trace);
 
-        ParseError(const ParseError& _e1, const ParseError& _e2)
-            : ParseError(_e1.position, _e1.message)
-        {
-            trace.insert(trace.end(), _e1.trace.begin(), _e1.trace.end());
-            trace.push_back(_e2);
-        }
+        std::string GetMessageWithTrace() const;
 
-        ParseError(Position _pos, const std::string& _msg, const std::vector<ParseError>& _trace)
-            : ParseError(_pos, _msg)
-        {
-            trace.insert(trace.end(), _trace.begin(), _trace.end());
-        }
+        const Position& GetPosition() const;
+        const std::string& GetMessage() const;
+        const std::vector<ParseError>& GetTrace() const;
 
-        ParseError()
-            : ParseError(Position(), "") { }
-
-        std::string GetMessageWithTrace() const
-        {
-            std::string traceMessage;
-
-            for (const ParseError& e : trace)
-                traceMessage += "\n" + std::regex_replace(e.GetMessageWithTrace(), std::regex("\\n"), "\n\t");
-
-            return what() + traceMessage;
-        }
-
-        const Position& GetPosition() const { return position; }
-        const std::string& GetMessage() const { return message; }
-        const std::vector<ParseError>& GetTrace() const { return trace; }
-
-        static ParseError Expectation(const std::string& _expected, const std::string& _found, const Position& _pos)
-        {
-            return ParseError(_pos, "Expected " + _expected + ", but found " + _found);
-        }
+        static ParseError Expectation(const std::string& _expected, const std::string& _found, const Position& _pos);
     };
 
     template<typename T>
@@ -175,10 +150,10 @@ namespace lpc
         T value;
 
         ParseResult(Position _pos, T _value)
-            : position(_pos), value(_value) {}
+            : position(_pos), value(_value) { }
 
         ParseResult()
-            : ParseResult(Position(), T()) {}
+            : ParseResult(Position(), T()) { }
     };
 
     template<typename T>

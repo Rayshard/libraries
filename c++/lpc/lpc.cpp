@@ -189,6 +189,46 @@ namespace lpc
     bool Lexer::HasPattern(const PatternID& _id) const { return _id == EOS_PATTERN_ID() || _id == UNKNOWN_PATTERN_ID() ? true : patternsMap.contains(_id); }
 
     Parser<std::string> Lexer::CreateLexeme(const PatternID& _id, const std::set<PatternID>& _ignores, std::optional<std::string> _value) const { return parsers::Lexeme(*this, GetPattern(_id).id, _ignores, _value); }
+
+    void Lexer::OnLexUnknown(StringStream& _stream, const Lexer::Token& _token) { throw std::runtime_error("Unrecognized token: '" + _token.value + "' at " + _token.position.ToString()); }
+#pragma endregion
+
+#pragma region ParseError
+    ParseError::ParseError(Position _pos, const std::string& _msg)
+        : std::runtime_error("Error @ " + _pos.ToString() + ": " + _msg), position(_pos), message(_msg), trace() { }
+
+    ParseError::ParseError(const ParseError& _e1, const ParseError& _e2)
+        : ParseError(_e1.position, _e1.message)
+    {
+        trace.insert(trace.end(), _e1.trace.begin(), _e1.trace.end());
+        trace.push_back(_e2);
+    }
+
+    ParseError::ParseError(Position _pos, const std::string& _msg, const std::vector<ParseError>& _trace)
+        : ParseError(_pos, _msg) {
+        trace.insert(trace.end(), _trace.begin(), _trace.end());
+    }
+
+    ParseError::ParseError() : ParseError(Position(), "") { }
+
+    std::string ParseError::GetMessageWithTrace() const
+    {
+        std::string traceMessage;
+
+        for (const ParseError& e : trace)
+            traceMessage += "\n" + std::regex_replace(e.GetMessageWithTrace(), std::regex("\\n"), "\n\t");
+
+        return what() + traceMessage;
+    }
+
+    const Position& ParseError::GetPosition() const { return position; }
+    const std::string& ParseError::GetMessage() const { return message; }
+    const std::vector<ParseError>& ParseError::GetTrace() const { return trace; }
+
+    ParseError ParseError::Expectation(const std::string& _expected, const std::string& _found, const Position& _pos)
+    {
+        return ParseError(_pos, "Expected " + _expected + ", but found " + _found);
+    }
 #pragma endregion
 
     namespace parsers

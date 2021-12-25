@@ -3,7 +3,7 @@
     ☐ add unicode support
 ☐ c++:lpc
     ☐ add tests
-    ☐ put none template code in cpp file
+    ✔ put none template code in cpp file @done(21-12-24 18:23)
     ✔ Change ParseError to inherit from std::exception and override the what func @done(21-12-02 18:29)
         ✔ This will allow you to store a 'trace' in an excpetion @done(21-12-02 18:29)
     ✔ Add Parser<T>.Satisfty(bool(*_predicate)(const Result&)) to parser: succeeds if predicate is true, fails if predicatte is fails @done(21-12-02 19:37)
