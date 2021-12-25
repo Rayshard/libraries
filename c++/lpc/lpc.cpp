@@ -293,7 +293,7 @@ namespace lpc
         {
             return Parser<std::monostate>([=](const Position& _pos, StringStream& _stream)
                 {
-                    if (_stream.IsEOS())
+                    if (!_stream.IsEOS())
                         throw ParseError::Expectation("'" + Lexer::EOS_PATTERN_ID() + "'", "'" + std::string(1, _stream.PeekChar()) + "'", _pos);
 
                     return ParseResult(_pos, std::monostate());
