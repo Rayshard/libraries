@@ -2,8 +2,10 @@
     ☐ README
     ☐ add unicode support
 ☐ c++:lpc
+    ☐ add and 'end' variable to ParseError that represents the offset of the stream at error
     ☐ add tests
     ☐ rename StringStream::GetChar to Get and same for PeekChar
+    ☐ remove all unnecessary asserts
     ✔ put none template code in cpp file @done(21-12-24 18:23)
     ✔ Change ParseError to inherit from std::exception and override the what func @done(21-12-02 18:29)
         ✔ This will allow you to store a 'trace' in an excpetion @done(21-12-02 18:29)

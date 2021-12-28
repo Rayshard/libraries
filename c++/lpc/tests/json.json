@@ -1,0 +1,24 @@
+"my string"
+123
+true
+false
+null
+{
+    "code": [
+        "START",
+        {
+            "opcode": "PUSH",
+            "value_type": "I64",
+            "value": 123
+        },
+        {
+            "opcode": "JUMP",
+            "label": "EXIT_CALL"
+        },
+        "EXIT_CALL",
+        {
+            "opcode": "SYSCALL",
+            "code": "EXIT"
+        }
+    ]
+}
