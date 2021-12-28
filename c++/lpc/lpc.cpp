@@ -3,6 +3,9 @@
 
 namespace lpc
 {
+    bool Position::operator==(const Position& _other) const { return line == _other.line && column == _other.column; }
+    bool Position::operator!=(const Position& _other) const { return !(*this == _other); }
+
     std::string Position::ToString() const { return "(" + std::to_string(line) + ", " + std::to_string(column) + ")"; }
 
     std::ostream& operator<<(std::ostream& _lhs, const Position& _rhs) { return _lhs << _rhs.ToString(); }

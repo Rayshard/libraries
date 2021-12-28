@@ -25,13 +25,27 @@ std::map<std::string, Test> tests =
     },
     {"Reference", []()
         {
-            ASSERT(false);
+            Reference<char> parser;
+            Function<char> function([=](const Position& _pos, StringStream& _stream) { return parser.Parse(_stream); });
+
+            parser.Set(Char());
+            ASSERT(parser.Parse("a") == function.Parse("a"));
+
+            Reference<char> reference = parser;
+            reference.Set(Char('b'));
+
+            try
+            {
+                function.Parse("a");
+                ASSERT(false);
+            }
+            catch(const ParseError& e) { }
         }
     },
     {"Map", []()
         {
             Function<int> parser = Function<int>([](const Position& _pos, StringStream& _stream) { return ParseResult<int>(_pos, 5); });
-            ASSERT((Map<int, int>(parser, [](ParseResult<int>& _input) { return 6; }).Parse("").value == 6));
+            ASSERT((Map<int, int>(parser, [](ParseResult<int>&& _input) { return 6; }).Parse("").value == 6));
         }
     },
     {"Chain", []()
@@ -174,7 +188,7 @@ std::map<std::string, Test> tests =
     {"List", []()
         {
             Function<char> charParser = Char();
-            auto [r1, r2, r3] = List(std::tie(*(const Parser<char>*)&charParser, *(const Parser<char>*)&charParser, *(const Parser<char>*)&charParser)).Parse("abc").value;
+            auto [r1, r2, r3] = (List(std::tie(*(const Parser<char>*) & charParser, *(const Parser<char>*) & charParser, *(const Parser<char>*) & charParser)) << EOS()).Parse("abc").value;
 
             ASSERT(r1.value == 'a');
             ASSERT(r2.value == 'b');
@@ -183,7 +197,7 @@ std::map<std::string, Test> tests =
     },
     {"&", []()
         {
-            auto [r1, r2, r3, r4, r5, r6] = (Char() & (((Char() & Char()) & Char()) & (Char() & Char()))).Parse("abcdef").value;
+            auto [r1, r2, r3, r4, r5, r6] = ((Char('a') & (((Char('b') & Char('c')) & Char('d')) & (Char('e') & Char('f')))) << EOS()).Parse("abcdef").value;
 
             ASSERT(r1.value == 'a');
             ASSERT(r2.value == 'b');
@@ -204,6 +218,50 @@ std::map<std::string, Test> tests =
         }
     },
     {"Fold", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"Longest", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"First", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"Named", []() { ASSERT((Named("MyParser", Char()) << EOS()).Parse("a").value == 'a'); } },
+    {"Prefixed", []() { ASSERT((Prefixed(Digit(), Letter()) << EOS()).Parse("1b").value == 'b'); } },
+    {"Suffixed", []() { ASSERT((Suffixed(Letter(), Digit()) << EOS()).Parse("b1").value == 'b'); } },
+    {">>", []() { ASSERT((Digit() >> Letter() << EOS()).Parse("1b").value == 'b'); } },
+    {"<<", []() { ASSERT((Letter() << Digit() << EOS()).Parse("b1").value == 'b'); } },
+    {"+", []()
+        {
+            CountValue<char> results = ((Char('a') + (((Char('b') + Char('c')) + Char('d')) + (Char('e') + Char('f')))) << EOS()).Parse("abcdef").value;
+
+            ASSERT(results.size() == 6);
+            ASSERT(results[0].value == 'a');
+            ASSERT(results[1].value == 'b');
+            ASSERT(results[2].value == 'c');
+            ASSERT(results[3].value == 'd');
+            ASSERT(results[4].value == 'e');
+            ASSERT(results[5].value == 'f');
+        }
+    },
+    {"|", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"Between", []() { ASSERT((Between(Char('a'), Char('b'), Char('c')) << EOS()).Parse("abc").value == 'b'); } },
+    {"LookAhead", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"Separate", []()
         {
             ASSERT(false);
         }
