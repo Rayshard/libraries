@@ -222,12 +222,7 @@ std::map<std::string, Test> tests =
             ASSERT(false);
         }
     },
-    {"Longest", []()
-        {
-            ASSERT(false);
-        }
-    },
-    {"First", []()
+    {"Choice", []()
         {
             ASSERT(false);
         }

@@ -672,22 +672,22 @@ namespace lpc
                 });
         }
 
-#pragma region Longest
+#pragma region Choice
         enum class ChoiceType { LONGEST, FIRST };
 
         template<typename T>
-        class Longest
+        class Choice : public Parser<T>
         {
             std::vector<Parser<T>*> parsers;
             ChoiceType type;
 
         public:
-            Longest(const std::vector<const Parser<T>&>& _parsers, ChoiceType _type) : parsers(_parsers.size()), type(_type)
+            Choice(const std::vector<const Parser<T>&>& _parsers, ChoiceType _type) : parsers(_parsers.size()), type(_type)
             {
                 std::transform(_parsers.cbegin(), _parsers.cend(), parsers.begin(), [](const Parser<T>& _parser) { return _parser.Clone(); });
             }
 
-            Longest(const Longest<T>& _other)
+            Choice(const Choice<T>& _other) : type(_other.type)
             {
                 for (auto& parser : parsers)
                     delete parser;
@@ -696,14 +696,16 @@ namespace lpc
                 std::transform(_other.parsers.cbegin(), _other.parsers.cend(), parsers.begin(), [](const Parser<T>& _parser) { return _parser.Clone(); });
             }
 
-            ~Longest()
+            ~Choice()
             {
                 for (auto& parser : parsers)
                     delete parser;
             }
 
-            Longest<T>& operator=(const Longest<T>& _other)
+            Choice<T>& operator=(const Choice<T>& _other)
             {
+                type = _other.type;
+
                 for (auto& parser : parsers)
                     delete parser;
 
@@ -720,29 +722,65 @@ namespace lpc
                 return references;
             }
 
-            ParseResult<T> OnParse(const Position& _pos, StringStream& _stream)
+            ChoiceType GetType() const { return type; }
+
+            Parser<T>* Clone() const { return new Clone(*this); }
+
+        protected:
+            ParseResult<T> OnParse(const Position& _pos, StringStream& _stream) const override
             {
-                size_t streamStart = _stream.GetOffset(), greatestLength = 0;
-                std::optional<ParseResult<T>> result;
-                std::vector<ParseError> errors;
-
-                for (const Parser<T>* parser : parsers)
+                switch (type)
                 {
-                    try
-                    {
-                        ParseResult<T> parseResult = parser->Parse(_stream);
-                        size_t length = _stream.GetOffset() - streamStart;
+                case ChoiceType::LONGEST:
+                {
+                    size_t streamStart = _stream.GetOffset(), greatestLength = 0;
+                    std::optional<ParseResult<T>> result;
+                    std::vector<ParseError> errors;
 
-                        if (!result.has_value() || length > greatestLength)
-                        {
-                            result = parseResult;
-                            greatestLength = length;
-                            errors.clear(); //We put this here to save memory
-                        }
-                    }
-                    catch (const ParseError& e)
+                    for (const Parser<T>* parser : parsers)
                     {
-                        if (!result.has_value())
+                        try
+                        {
+                            ParseResult<T> parseResult = parser->Parse(_stream);
+                            size_t length = _stream.GetOffset() - streamStart;
+
+                            if (!result.has_value() || length > greatestLength)
+                            {
+                                result = parseResult;
+                                greatestLength = length;
+                                errors.clear(); //We put this here to save memory
+                            }
+                        }
+                        catch (const ParseError& e)
+                        {
+                            if (!result.has_value())
+                            {
+                                size_t eLength = _stream.GetOffset(e.GetPosition());
+                                size_t errorsLength = errors.empty() ? 0 : _stream.GetOffset(errors.back().GetPosition());
+
+                                if (eLength == errorsLength) { errors.push_back(e); }
+                                else if (eLength > errorsLength) { errors = { e }; }
+                            }
+                        }
+
+                        _stream.SetOffset(streamStart);
+                    }
+
+                    if (!result.has_value())
+                        throw errors.size() == 1 ? errors.back() : ParseError(_pos, "No option parsed!", errors);
+
+                    _stream.SetOffset(streamStart + greatestLength);
+                    return result.value();
+                } break;
+                case ChoiceType::FIRST:
+                {
+                    size_t streamStart = _stream.GetOffset();
+                    std::vector<ParseError> errors;
+
+                    for (Parser<T>& parser : parsers)
+                    {
+                        try { return parser.Parse(_stream); }
+                        catch (const ParseError& e)
                         {
                             size_t eLength = _stream.GetOffset(e.GetPosition());
                             size_t errorsLength = errors.empty() ? 0 : _stream.GetOffset(errors.back().GetPosition());
@@ -750,113 +788,77 @@ namespace lpc
                             if (eLength == errorsLength) { errors.push_back(e); }
                             else if (eLength > errorsLength) { errors = { e }; }
                         }
+
+                        _stream.SetOffset(streamStart);
                     }
 
-                    _stream.SetOffset(streamStart);
-                }
-
-                if (!result.has_value())
                     throw errors.size() == 1 ? errors.back() : ParseError(_pos, "No option parsed!", errors);
-
-                _stream.SetOffset(streamStart + greatestLength);
-                return result.value();
+                } break;
+                default: assert("Case not handled!");
+                }
             }
         };
 
         template<typename T>
-        Longest<T> operator|(const Parser<T>& _option1, const Parser<T>& _option2) { return Longest<T>({ _option1, _option2 }); }
+        Choice<T> operator|(const Parser<T>& _option1, const Parser<T>& _option2) { return Choice<T>({ _option1, _option2 }, ChoiceType::LONGEST); }
 
         template<typename T>
-        Longest<T> operator|(const Longest<T>& _firstOptions, const Parser<T>& _lastOption)
+        Choice<T> operator|(const Choice<T>& _firstOptions, const Parser<T>& _lastOption)
         {
             std::vector<const Parser<T>&> options = _firstOptions.GetParsers();
             options.push_back(_lastOption);
-            return Longest<T>(std::move(options));
+            return Choice<T>(std::move(options), ChoiceType::LONGEST);
         }
 
         template<typename T>
-        Longest<T> operator|(const Parser<T>& _firstOption, const Longest<T>& _lastOptions)
+        Choice<T> operator|(const Parser<T>& _firstOption, const Choice<T>& _lastOptions)
         {
             std::vector<const Parser<T>&> options = { _firstOption };
             std::vector<const Parser<T>&> lastParsers = _lastOptions.GetParsers();
 
             options.insert(options.end(), lastParsers.begin(), lastParsers.end());
-            return Longest<T>(std::move(options));
+            return Choice<T>(std::move(options), ChoiceType::LONGEST);
         }
 
         template<typename T>
-        Longest<T> operator|(const Longest<T>& _firstOptions, const Longest<T>& _lastOptions)
+        Choice<T> operator|(const Choice<T>& _firstOptions, const Choice<T>& _lastOptions)
         {
             std::vector<const Parser<T>&> options = _firstOptions.GetParsers();
             std::vector<const Parser<T>&> lastParsers = _lastOptions.GetParsers();
 
             options.insert(options.end(), lastParsers.begin(), lastParsers.end());
-            return Longest<T>(std::move(options));
+            return Choice<T>(std::move(options), ChoiceType::LONGEST);
         }
-#pragma endregion
 
-#pragma region First
         template<typename T>
-        class First
+        Choice<T> operator||(const Parser<T>& _option1, const Parser<T>& _option2) { return Choice<T>({ _option1, _option2 }, ChoiceType::FIRST); }
+
+        template<typename T>
+        Choice<T> operator||(const Choice<T>& _firstOptions, const Parser<T>& _lastOption)
         {
-            std::vector<Parser<T>*> parsers;
-
-        public:
-            First(const std::vector<Parser<T>>& _parsers) : parsers(_parsers) {}
-
-            ParseResult<T> OnParse(const Position& _pos, StringStream& _stream)
-            {
-                size_t streamStart = _stream.GetOffset();
-                std::vector<ParseError> errors;
-
-                for (Parser<T>& parser : parsers)
-                {
-                    try { return parser.Parse(_stream); }
-                    catch (const ParseError& e)
-                    {
-                        size_t eLength = _stream.GetOffset(e.GetPosition());
-                        size_t errorsLength = errors.empty() ? 0 : _stream.GetOffset(errors.back().GetPosition());
-
-                        if (eLength == errorsLength) { errors.push_back(e); }
-                        else if (eLength > errorsLength) { errors = { e }; }
-                    }
-
-                    _stream.SetOffset(streamStart);
-                }
-
-                throw errors.size() == 1 ? errors.back() : ParseError(_pos, "No option parsed!", errors);
-            }
-        };
-
-        template<typename T>
-        First<T> operator||(const Parser<T>& _option1, const Parser<T>& _option2) { return First<T>({ _option1, _option2 }); }
-
-        template<typename T>
-        First<T> operator||(const First<T>& _firstOptions, const Parser<T>& _lastOption)
-        {
-            std::vector<Parser<T>> options = _firstOptions.parsers;
+            std::vector<const Parser<T>&> options = _firstOptions.GetParsers();
             options.push_back(_lastOption);
-            return First<T>(std::move(options));
+            return Choice<T>(std::move(options), ChoiceType::FIRST);
         }
 
         template<typename T>
-        First<T> operator||(const Parser<T>& _firstOption, const First<T>& _lastOptions)
+        Choice<T> operator||(const Parser<T>& _firstOption, const Choice<T>& _lastOptions)
         {
-            std::vector<Parser<T>> options = { _firstOption };
-            const std::vector<Parser<T>>& lastParsers = _lastOptions.parsers;
+            std::vector<const Parser<T>&> options = { _firstOption };
+            std::vector<const Parser<T>&> lastParsers = _lastOptions.GetParsers();
 
             options.insert(options.end(), lastParsers.begin(), lastParsers.end());
-            return First<T>(std::move(options));
+            return Choice<T>(std::move(options), ChoiceType::FIRST);
         }
 
         template<typename T>
-        First<T> operator||(const First<T>& _firstOptions, const First<T>& _lastOptions)
+        Choice<T> operator||(const Choice<T>& _firstOptions, const Choice<T>& _lastOptions)
         {
-            std::vector<Parser<T>> options = _firstOptions.parsers;
-            const std::vector<Parser<T>>& lastParsers = _lastOptions.parsers;
+            std::vector<const Parser<T>&> options = _firstOptions.GetParsers();
+            std::vector<const Parser<T>&> lastParsers = _lastOptions.GetParsers();
 
             options.insert(options.end(), lastParsers.begin(), lastParsers.end());
-            return First<T>(std::move(options));
+            return Choice<T>(std::move(options), ChoiceType::FIRST);
         }
 #pragma endregion
 
