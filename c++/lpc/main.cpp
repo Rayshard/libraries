@@ -258,19 +258,14 @@
 using namespace lpc;
 using namespace lpc::parsers;
 
-struct MyParser : public Parser<int>
+struct MyParser
 {
-
-    Parser<int>* Clone() const override { return new MyParser(); }
-
-protected:
-    ParseResult<int> OnParse(const Position& _pos, StringStream& _stream) const override { return ParseResult<int>(_pos, 5); }
+    ParseResult<int> operator() (const Position& _pos, StringStream& _stream) { return ParseResult<int>(_pos, 5); }
 };
 
 int main()
 {
     std::cout << Map<int, int>(MyParser(), [](ParseResult<int>&& _input) { return 6; }).Parse("Hello World").value << std::endl;
-
 
     return 0;
 }

@@ -141,152 +141,152 @@ namespace lpc
 
     namespace parsers
     {
-        namespace lexing
-        {
-            //         Lexer::Lexer(Action _onEOS, Action _onUnknown)
-            //             : patterns(), patternsMap(), patternEOS(CreatePattern(EOS_PATTERN_ID(), Regex(), _onEOS)), patternUnknown(CreatePattern(UNKNOWN_PATTERN_ID(), Regex("[\\S\\s]"), _onUnknown)) { }
+        // namespace lexing
+        // {
+        //     //         Lexer::Lexer(Action _onEOS, Action _onUnknown)
+        //     //             : patterns(), patternsMap(), patternEOS(CreatePattern(EOS_PATTERN_ID(), Regex(), _onEOS)), patternUnknown(CreatePattern(UNKNOWN_PATTERN_ID(), Regex("[\\S\\s]"), _onUnknown)) { }
 
-            //         PatternID Lexer::AddPattern(const PatternID& _id, const Regex& _regex, Action _action)
-            //         {
-            //             if (_id.empty()) { throw std::runtime_error("_id cannot be empty!"); }
-            //             else if (HasPattern(_id)) { throw std::runtime_error("Pattern with id '" + _id + "' already exists!"); }
+        //     //         PatternID Lexer::AddPattern(const PatternID& _id, const Regex& _regex, Action _action)
+        //     //         {
+        //     //             if (_id.empty()) { throw std::runtime_error("_id cannot be empty!"); }
+        //     //             else if (HasPattern(_id)) { throw std::runtime_error("Pattern with id '" + _id + "' already exists!"); }
 
-            //             patterns.push_back(CreatePattern(_id, _regex, _action));
-            //             patternsMap[_id] = patterns.size() - 1;
-            //             return _id;
-            //         }
+        //     //             patterns.push_back(CreatePattern(_id, _regex, _action));
+        //     //             patternsMap[_id] = patterns.size() - 1;
+        //     //             return _id;
+        //     //         }
 
-            //         PatternID Lexer::AddPattern(Regex _regex, Action _action) { return AddPattern("<Pattern: " + std::to_string(patterns.size()) + ">", _regex, _action); }
+        //     //         PatternID Lexer::AddPattern(Regex _regex, Action _action) { return AddPattern("<Pattern: " + std::to_string(patterns.size()) + ">", _regex, _action); }
 
-            //         bool Lexer::HasPattern(const PatternID& _id) const { return _id == EOS_PATTERN_ID() || _id == UNKNOWN_PATTERN_ID() || patternsMap.contains(_id); }
+        //     //         bool Lexer::HasPattern(const PatternID& _id) const { return _id == EOS_PATTERN_ID() || _id == UNKNOWN_PATTERN_ID() || patternsMap.contains(_id); }
 
-            //         Parser<std::string> Lexer::CreateLexeme(const PatternID& _id, const std::set<PatternID>& _ignores, std::optional<std::string> _value) const
-            //         {
-            //             if (!HasPattern(_id)) { throw std::runtime_error("Pattern with id '" + _id + "' does not exist!"); }
-            //             else { return Lexeme(*this, _id, _ignores, _value); }
-            //         }
+        //     //         Parser<std::string> Lexer::CreateLexeme(const PatternID& _id, const std::set<PatternID>& _ignores, std::optional<std::string> _value) const
+        //     //         {
+        //     //             if (!HasPattern(_id)) { throw std::runtime_error("Pattern with id '" + _id + "' does not exist!"); }
+        //     //             else { return Lexeme(*this, _id, _ignores, _value); }
+        //     //         }
 
-            //         void Lexer::OnLexUnknown(StringStream& _stream, const ParseResult<Token>& _result) { throw ParseError(_result.position, "Unrecognized token: '" + _result.value.value); }
+        //     //         void Lexer::OnLexUnknown(StringStream& _stream, const ParseResult<Token>& _result) { throw ParseError(_result.position, "Unrecognized token: '" + _result.value.value); }
 
-            //         ParseResult<Token> Lexer::OnParse(const Position& _pos, StringStream& _stream)
-            //         {
-            //             ParseResult<PatternParseValue> patternParseResult;
+        //     //         ParseResult<Token> Lexer::OnParse(const Position& _pos, StringStream& _stream)
+        //     //         {
+        //     //             ParseResult<PatternParseValue> patternParseResult;
 
-            //             if (_stream.IsEOS()) { patternParseResult = patternEOS.Parse(_stream); }
-            //             else
-            //             {
-            //                 Longest<PatternParseValue> longest(std::move(patterns));
+        //     //             if (_stream.IsEOS()) { patternParseResult = patternEOS.Parse(_stream); }
+        //     //             else
+        //     //             {
+        //     //                 Longest<PatternParseValue> longest(std::move(patterns));
 
-            //                 try { patternParseResult = longest.OnParse(_stream.GetPosition(), _stream); }
-            //                 catch (const ParseError& e) { patternParseResult = patternUnknown.Parse(_stream); }
+        //     //                 try { patternParseResult = longest.OnParse(_stream.GetPosition(), _stream); }
+        //     //                 catch (const ParseError& e) { patternParseResult = patternUnknown.Parse(_stream); }
 
-            //                 patterns = std::move(longest.parsers);
-            //             }
+        //     //                 patterns = std::move(longest.parsers);
+        //     //             }
 
-            //             auto& [token, patternAction] = patternParseResult.value;
-            //             ParseResult<Token> result(std::move(patternParseResult.position), std::move(token));
+        //     //             auto& [token, patternAction] = patternParseResult.value;
+        //     //             ParseResult<Token> result(std::move(patternParseResult.position), std::move(token));
 
-            //             if (const lexing::Function* action = std::get_if<lexing::Function>(&patternAction)) { result.value.value = (*action)(_stream, result); }
-            //             else if (const Procedure* action = std::get_if<Procedure>(&patternAction)) { (*action)(_stream, result); }
+        //     //             if (const lexing::Function* action = std::get_if<lexing::Function>(&patternAction)) { result.value.value = (*action)(_stream, result); }
+        //     //             else if (const Procedure* action = std::get_if<Procedure>(&patternAction)) { (*action)(_stream, result); }
 
-            //             return result;
-            //         }
+        //     //             return result;
+        //     //         }
 
-            //         Pattern Lexer::CreatePattern(const PatternID& _id, const Regex& _regex, Action _action)
-            //         {
-            //             return Map<std::string, PatternParseValue>(Lexeme(_regex), [=](ParseResult<std::string>& _result)
-            //                 {
-            //                     return PatternParseValue
-            //                     {
-            //                         .token = Token{.patternID = _id,
-            //                         .value = _result.value}, .action = _action
-            //                     };
-            //                 });
-            //         }
-            //     }
+        //     //         Pattern Lexer::CreatePattern(const PatternID& _id, const Regex& _regex, Action _action)
+        //     //         {
+        //     //             return Map<std::string, PatternParseValue>(Lexeme(_regex), [=](ParseResult<std::string>& _result)
+        //     //                 {
+        //     //                     return PatternParseValue
+        //     //                     {
+        //     //                         .token = Token{.patternID = _id,
+        //     //                         .value = _result.value}, .action = _action
+        //     //                     };
+        //     //                 });
+        //     //         }
+        //     //     }
 
-            //     Parser<std::string> Lexeme(lexing::Lexer _lexer, const lexing::PatternID& _id, const std::set<lexing::PatternID>& _ignores, std::optional<std::string> _value)
-            //     {
-            //         return Parser<std::string>([=](const Position& _pos, StringStream& _stream)
-            //             {
-            //                 lexing::Lexer lexer = _lexer;
-            //                 ParseResult<lexing::Token> token;
+        //     //     Parser<std::string> Lexeme(lexing::Lexer _lexer, const lexing::PatternID& _id, const std::set<lexing::PatternID>& _ignores, std::optional<std::string> _value)
+        //     //     {
+        //     //         return Parser<std::string>([=](const Position& _pos, StringStream& _stream)
+        //     //             {
+        //     //                 lexing::Lexer lexer = _lexer;
+        //     //                 ParseResult<lexing::Token> token;
 
-            //                 while (_ignores.contains((token = lexer.OnParse(_stream.GetPosition(), _stream)).value.patternID))
-            //                     ;
+        //     //                 while (_ignores.contains((token = lexer.OnParse(_stream.GetPosition(), _stream)).value.patternID))
+        //     //                     ;
 
-            //                 auto& [patternID, tokenValue] = token.value;
+        //     //                 auto& [patternID, tokenValue] = token.value;
 
-            //                 if (patternID != _id)
-            //                 {
-            //                     std::string expected = "'" + _id + (_value.has_value() ? "(" + _value.value() + ")" : "") + "'";
-            //                     std::string found = "'" + patternID + (tokenValue.empty() ? "" : "(" + tokenValue + ")") + "'";
-            //                     throw ParseError::Expectation(expected, found, token.position);
-            //                 }
-            //                 else if (_value.has_value() && tokenValue != _value.value()) { throw ParseError::Expectation("'" + _value.value() + "'", "'" + tokenValue + "'", token.position); }
+        //     //                 if (patternID != _id)
+        //     //                 {
+        //     //                     std::string expected = "'" + _id + (_value.has_value() ? "(" + _value.value() + ")" : "") + "'";
+        //     //                     std::string found = "'" + patternID + (tokenValue.empty() ? "" : "(" + tokenValue + ")") + "'";
+        //     //                     throw ParseError::Expectation(expected, found, token.position);
+        //     //                 }
+        //     //                 else if (_value.has_value() && tokenValue != _value.value()) { throw ParseError::Expectation("'" + _value.value() + "'", "'" + tokenValue + "'", token.position); }
 
-            //                 return ParseResult<std::string>(token.position, tokenValue);
-            //             });
-        }
+        //     //                 return ParseResult<std::string>(token.position, tokenValue);
+        //     //             });
+        // }
 
-        Function<std::string> Lexeme(const Regex& _regex, std::optional<std::string> _value)
-        {
-            return Function<std::string>([=](const Position& _pos, StringStream& _stream)
-                {
-                    const char* current = &*_stream.CCurrent();
-                    const char* end = &*_stream.CEnd();
-                    std::cmatch regexMatch;
-                    std::regex_search(current, end, regexMatch, _regex, std::regex_constants::match_continuous);
+        // ParserPtr<std::string> Lexeme(const Regex& _regex, std::optional<std::string> _value)
+        // {
+        //     return Function<std::string>([=](const Position& _pos, StringStream& _stream)
+        //         {
+        //             const char* current = &*_stream.CCurrent();
+        //             const char* end = &*_stream.CEnd();
+        //             std::cmatch regexMatch;
+        //             std::regex_search(current, end, regexMatch, _regex, std::regex_constants::match_continuous);
 
-                    if (regexMatch.size() == 0)
-                        throw ParseError(_pos, "No match found for regular expression: " + _regex.GetString());
+        //             if (regexMatch.size() == 0)
+        //                 throw ParseError(_pos, "No match found for regular expression: " + _regex.GetString());
 
-                    std::string match = regexMatch.str();
+        //             std::string match = regexMatch.str();
 
-                    if (_value.has_value() && match != _value.value())
-                        throw ParseError::Expectation("'" + _value.value() + "'", "'" + match + "'", _pos);
+        //             if (_value.has_value() && match != _value.value())
+        //                 throw ParseError::Expectation("'" + _value.value() + "'", "'" + match + "'", _pos);
 
-                    _stream.IgnoreChars(match.length());
-                    return ParseResult<std::string>(_pos, match);
-                });
-        }
+        //             _stream.IgnoreChars(match.length());
+        //             return ParseResult<std::string>(_pos, match);
+        //         });
+        // }
 
-        Function<std::string> Chars(std::optional<std::string> _value) { return Lexeme(Regex("[\\S\\s]+"), _value); }
-        Function<std::string> Letters(std::optional<std::string> _value) { return Lexeme(Regex("[a-zA-Z]+"), _value); }
-        Function<std::string> Digits(std::optional<std::string> _value) { return Lexeme(Regex("[0-9]+"), _value); }
-        Function<std::string> AlphaNums(std::optional<std::string> _value) { return Lexeme(Regex("[a-zA-Z0-9]+"), _value); }
-        Function<std::string> Whitespaces(std::optional<std::string> _value) { return Lexeme(Regex("\\s+"), _value); }
+        // ParserPtr<std::string> Chars(std::optional<std::string> _value) { return Lexeme(Regex("[\\S\\s]+"), _value); }
+        // ParserPtr<std::string> Letters(std::optional<std::string> _value) { return Lexeme(Regex("[a-zA-Z]+"), _value); }
+        // ParserPtr<std::string> Digits(std::optional<std::string> _value) { return Lexeme(Regex("[0-9]+"), _value); }
+        // ParserPtr<std::string> AlphaNums(std::optional<std::string> _value) { return Lexeme(Regex("[a-zA-Z0-9]+"), _value); }
+        // ParserPtr<std::string> Whitespaces(std::optional<std::string> _value) { return Lexeme(Regex("\\s+"), _value); }
 
-        Function<char> Char(const Regex& _regex, std::optional<char> _value)
-        {
-            std::optional<std::string> value = _value.has_value() ? std::optional(std::string(1, _value.value())) : std::nullopt;
-            return Map<std::string, char>(Lexeme(_regex, value), [](const ParseResult<std::string>& _result) { return _result.value[0]; });
-        }
+        // ParserPtr<char> Char(const Regex& _regex, std::optional<char> _value)
+        // {
+        //     std::optional<std::string> value = _value.has_value() ? std::optional(std::string(1, _value.value())) : std::nullopt;
+        //     return Map<std::string, char>(Lexeme(_regex, value), [](const ParseResult<std::string>& _result) { return _result.value[0]; });
+        // }
 
-        Function<char> Letter(std::optional<char> _value) { return Char(Regex("[a-zA-Z]"), _value); }
-        Function<char> Digit(std::optional<char> _value) { return Char(Regex("[0-9]"), _value); }
-        Function<char> AlphaNum(std::optional<char> _value) { return Char(Regex("[a-zA-Z0-9]"), _value); }
-        Function<char> Whitespace(std::optional<char> _value) { return Char(Regex("\\s"), _value); }
-        Function<char> Char(std::optional<char> _value) { return Char(Regex("[\\S\\s]"), _value); }
+        // ParserPtr<char> Letter(std::optional<char> _value) { return Char(Regex("[a-zA-Z]"), _value); }
+        // ParserPtr<char> Digit(std::optional<char> _value) { return Char(Regex("[0-9]"), _value); }
+        // ParserPtr<char> AlphaNum(std::optional<char> _value) { return Char(Regex("[a-zA-Z0-9]"), _value); }
+        // ParserPtr<char> Whitespace(std::optional<char> _value) { return Char(Regex("\\s"), _value); }
+        // ParserPtr<char> Char(std::optional<char> _value) { return Char(Regex("[\\S\\s]"), _value); }
 
-        Function<std::monostate> EOS()
-        {
-            return Function<std::monostate>([=](const Position& _pos, StringStream& _stream)
-                {
-                    if (!_stream.IsEOS())
-                        throw ParseError::Expectation("'" + lexing::EOS_PATTERN_ID() + "'", "'" + std::string(1, _stream.PeekChar()) + "'", _pos);
+        // ParserPtr<std::monostate> EOS()
+        // {
+        //     return Function<std::monostate>([=](const Position& _pos, StringStream& _stream)
+        //         {
+        //             if (!_stream.IsEOS())
+        //                 throw ParseError::Expectation("'" + lexing::EOS_PATTERN_ID() + "'", "'" + std::string(1, _stream.PeekChar()) + "'", _pos);
 
-                    return ParseResult(_pos, std::monostate());
-                });
-        }
+        //             return ParseResult(_pos, std::monostate());
+        //         });
+        // }
 
-        Function<std::monostate> Error(const std::string& _message)
-        {
-            return Function<std::monostate>([=](const Position& _pos, StringStream& _stream)
-                {
-                    throw ParseError(_stream.GetPosition(), _message);
-                    return ParseResult<std::monostate>(_pos, std::monostate());
-                });
-        }
+        // ParserPtr<std::monostate> Error(const std::string& _message)
+        // {
+        //     return Function<std::monostate>([=](const Position& _pos, StringStream& _stream)
+        //         {
+        //             throw ParseError(_stream.GetPosition(), _message);
+        //             return ParseResult<std::monostate>(_pos, std::monostate());
+        //         });
+        // }
     }
 }
