@@ -36,12 +36,12 @@ std::map<std::string, Test> tests =
             catch (const ParseError& e) {}
         }
     },
-    // {"Map", []()
-    //     {
-    //         auto parser = Function<int>([](const Position& _pos, StringStream& _stream) { return ParseResult<int>(_pos, 5); });
-    //         ASSERT((Map<int, int>(parser, [](ParseResult<int>&& _input) { return 6; })->Parse("").value == 6));
-    //     }
-    // },
+    {"Map", []()
+        {
+            auto parser = Parser<int>([](const Position& _pos, StringStream& _stream) { return ParseResult<int>(_pos, 5); });
+            ASSERT((Map<int, int>(parser, [](ParseResult<int>&& _input) { return 6; }).Parse("").value == 6));
+        }
+    },
     // {"Chain", []()
     //     {
     //         auto parser = Function<char>([](const Position& _pos, StringStream& _stream) { return ParseResult<char>(_pos, _stream.GetChar()); });
