@@ -34,9 +34,9 @@ namespace lpc
     public:
         StringStream(const std::string& _data);
 
-        char GetChar();
-        char PeekChar();
-        void IgnoreChars(size_t _amt);
+        char Get();
+        char Peek();
+        void Ignore(size_t _amt);
 
         size_t GetOffset() const;
         size_t GetOffset(const Position& _pos) const;
@@ -87,6 +87,9 @@ namespace lpc
         const Position& GetPosition() const;
         const std::string& GetMessage() const;
         const std::vector<ParseError>& GetTrace() const;
+
+        bool operator==(const ParseError& _other) const;
+        bool operator!=(const ParseError& _other) const;
 
         static ParseError Expectation(const std::string& _expected, const std::string& _found, const Position& _pos);
     };
@@ -147,7 +150,7 @@ namespace lpc
     namespace parsers
     {
         template<typename In, typename Out>
-        Parser<Out> Map(Parser<In> _parser, std::function<Out(ParseResult<In>&&)> _map)
+        Parser<Out> Map(const Parser<In>& _parser, std::function<Out(ParseResult<In>&&)> _map)
         {
             return Parser<Out>([=](const Position& _pos, StringStream& _stream)
                 {
@@ -171,143 +174,141 @@ namespace lpc
             ParseResult<T> operator() (const Position& _pos, StringStream& _stream) { return (*reference)->Parse(_stream); }
         };
 
-// #pragma region Try
-//         template<typename T>
-//         struct TryValue
-//         {
-//             std::variant<T, ParseError> variant;
+#pragma region Try
+        template<typename T>
+        struct TryValue
+        {
+            using Variant = std::variant<T, ParseError>;
+            Variant variant;
 
-//             bool IsSuccess() { return variant.index() == 0; }
-//             bool IsError() { return variant.index() == 1; }
+            TryValue() : variant() { }
+            TryValue(const Variant& _t) : variant(_t) { }
 
-//             T* ExtractSuccess() { return std::get_if<std::variant_alternative_t<0, TryValue<T>>>(&variant); }
-//             ParseError* ExtractError() { return std::get_if<std::variant_alternative_t<1, TryValue<T>>>(&variant); }
-//         };
+            bool IsSuccess() { return variant.index() == 0; }
+            bool IsError() { return variant.index() == 1; }
 
-//         template<typename T>
-//         using TryResult = ParseResult<TryValue<T>>;
+            T* ExtractSuccess() { return std::get_if<std::variant_alternative_t<0, Variant>>(&variant); }
+            ParseError* ExtractError() { return std::get_if<std::variant_alternative_t<1, Variant>>(&variant); }
 
-//         template<typename T>
-//         using TryParser = Function<TryValue<T>>;
+            static TryValue<T> CreateSuccess(const T& _value) { return TryValue<T>(Variant(std::in_place_index_t<0>(), _value)); }
+            static TryValue<T> CreateError(const ParseError& _e) { return TryValue<T>(Variant(std::in_place_index_t<1>(), _e)); }
+        };
 
-//         template<typename T>
-//         using TryParserPtr = ParserPtr<TryValue<T>>;
+        template<typename T>
+        using TryResult = ParseResult<TryValue<T>>;
 
-//         template<typename T>
-//         TryParserPtr<T> Try(ParserPtr<T> _parser)
-//         {
-//             return std::make_shared<TryParser<T>>([=](const Position& _pos, StringStream& _stream)
-//                 {
-//                     try
-//                     {
-//                         ParseResult<T> result = _parser->Parse(_stream);
-//                         return TryResult<T>(result.position, TryValue<T>{ result.value });
-//                     }
-//                     catch (const ParseError& e) { return TryResult<T>(e.GetPosition(), e); }
-//                 });
-//         }
-// #pragma endregion
+        template<typename T>
+        using TryParser = Parser<TryValue<T>>;
 
-// #pragma region Count
-//         template<typename T>
-//         using CountValue = std::vector<ParseResult<T>>;
+        template<typename T>
+        TryParser<T> Try(const Parser<T>& _parser)
+        {
+            return TryParser<T>([=](const Position& _pos, StringStream& _stream)
+                {
+                    try
+                    {
+                        ParseResult<T> result = _parser.Parse(_stream);
+                        return TryResult<T>(result.position, TryValue<T>::CreateSuccess(result.value));
+                    }
+                    catch (const ParseError& e) { return TryResult<T>(e.GetPosition(), TryValue<T>::CreateError(e)); }
+                });
+        }
+#pragma endregion
 
-//         template<typename T>
-//         using CountResult = ParseResult<CountValue<T>>;
+#pragma region Count
+        template<typename T>
+        using CountValue = std::vector<ParseResult<T>>;
 
-//         template<typename T>
-//         using CountParser = Function<CountValue<T>>;
+        template<typename T>
+        using CountResult = ParseResult<CountValue<T>>;
 
-//         template<typename T>
-//         using CountParserPtr = ParserPtr<CountValue<T>>;
+        template<typename T>
+        using CountParser = Parser<CountValue<T>>;
 
-//         template<typename T>
-//         CountParserPtr<T> Count(ParserPtr<T> _parser, size_t _min, size_t _max)
-//         {
-//             if (_max < _min)
-//                 throw std::runtime_error("_max must be at least _min: " + std::to_string(_max) + " < " + std::to_string(_min));
+        template<typename T>
+        CountParser<T> Count(const Parser<T>& _parser, size_t _min, size_t _max)
+        {
+            if (_max < _min)
+                throw std::runtime_error("_max must be at least _min: " + std::to_string(_max) + " < " + std::to_string(_min));
 
-//             return std::make_shared<CountParser<T>>([=](const Position& _pos, StringStream& _stream)
-//                 {
-//                     CountValue<T> results;
+            return CountParser<T>([=](const Position& _pos, StringStream& _stream)
+                {
+                    CountValue<T> results;
 
-//                     if (_max != 0)
-//                     {
-//                         while (results.size() <= _max)
-//                         {
-//                             try { results.push_back(_parser->Parse(_stream)); }
-//                             catch (const ParseError& e)
-//                             {
-//                                 if (results.size() >= _min)
-//                                     break;
+                    if (_max != 0)
+                    {
+                        while (results.size() < _max)
+                        {
+                            try { results.push_back(_parser.Parse(_stream)); }
+                            catch (const ParseError& e)
+                            {
+                                if (results.size() >= _min)
+                                    break;
 
-//                                 ParseError error = ParseError::Expectation("at least " + std::to_string(_min), "only " + std::to_string(results.size()), _stream.GetPosition());
-//                                 throw ParseError(e, error);
-//                             }
-//                         }
-//                     }
+                                ParseError error = ParseError::Expectation("at least " + std::to_string(_min), "only " + std::to_string(results.size()), _stream.GetPosition());
+                                throw ParseError(e, error);
+                            }
+                        }
+                    }
 
-//                     Position position = results.size() == 0 ? _pos : results[0].position; //this is separated from the return statement because of the unknown order of argument evaluation 
-//                     return CountResult<T>(position, std::move(results));
-//                 });
-//         }
+                    Position position = results.size() == 0 ? _pos : results[0].position; //this is separated from the return statement because of the unknown order of argument evaluation 
+                    return CountResult<T>(position, std::move(results));
+                });
+        }
 
-//         template<typename T>
-//         CountParserPtr<T> ManyOrOne(ParserPtr<T> _parser) { return Count<T>(_parser, 1, -1); }
+        template<typename T>
+        CountParser<T> ManyOrOne(const Parser<T>& _parser) { return Count<T>(_parser, 1, -1); }
 
-//         template<typename T>
-//         CountParserPtr<T> ZeroOrOne(ParserPtr<T> _parser) { return Count<T>(_parser, 0, 1); }
+        template<typename T>
+        CountParser<T> ZeroOrOne(const Parser<T>& _parser) { return Count<T>(_parser, 0, 1); }
 
-//         template<typename T>
-//         CountParserPtr<T> ZeroOrMore(ParserPtr<T> _parser) { return Count<T>(_parser, 0, -1); }
+        template<typename T>
+        CountParser<T> ZeroOrMore(const Parser<T>& _parser) { return Count<T>(_parser, 0, -1); }
 
-//         template<typename T>
-//         CountParserPtr<T> Exactly(ParserPtr<T> _parser, size_t _n) { return Count<T>(_parser, _n, _n); }
-// #pragma endregion
+        template<typename T>
+        CountParser<T> Exactly(const Parser<T>& _parser, size_t _n) { return Count<T>(_parser, _n, _n); }
+#pragma endregion
 
-// #pragma region List
-//         template<typename... Ts>
-//         using ListValue = std::tuple<ParseResult<Ts>...>;
+#pragma region List
+        template<typename... Ts>
+        using ListValue = std::tuple<ParseResult<Ts>...>;
 
-//         template<typename... Ts>
-//         using ListResult = ParseResult<ListValue<Ts...>>;
+        template<typename... Ts>
+        using ListResult = ParseResult<ListValue<Ts...>>;
 
-//         template<typename... Ts>
-//         using ListPtr = ParserPtr<ListValue<Ts...>>;
+        template<typename... Ts>
+        class List
+        {
+            using Parsers = std::tuple<Parser<Ts>...>;
+            Parsers parsers;
 
-//         template<typename... Ts>
-//         struct List : public Parser<ListValue<Ts...>>
-//         {
-//             using Parsers = std::tuple<ParserPtr<Ts>...>;
-//             Parsers parsers;
+        public:
+            List() : parsers() {}
+            List(const Parsers& _parsers) : parsers(_parsers) {}
 
-//         public:
-//             List(const std::tuple<ParserPtr<Ts>...>& _parsers) : parsers(_parsers) {}
+            const Parsers& GetParsers() const { return parsers; }
 
-//             const std::tuple<ParserPtr<Ts>...>& GetParsers() const { return parsers; }
+            ListResult<Ts...> operator() (const Position& _pos, StringStream& _stream)
+            {
+                ListValue<Ts...> results = std::apply([&](auto &&... _parsers) { return ListValue<Ts...>{_parsers.Parse(_stream)...}; }, parsers);
+                Position position = sizeof...(Ts) == 0 ? _pos : std::get<0>(results).position; //this is separated from the return statement because of the unknown order of argument evaluation 
 
-//         protected:
-//             ListResult<Ts...> OnParse(const Position& _pos, StringStream& _stream) const override
-//             {
-//                 ListValue<Ts...> results = std::apply([&](auto &&... _parsers) { return ListValue<Ts...>{_parsers->Parse(_stream)...}; }, parsers);
-//                 Position position = sizeof...(Ts) == 0 ? _pos : std::get<0>(results).position; //this is separated from the return statement because of the unknown order of argument evaluation 
+                return ListResult<Ts...>(position, std::move(results));
+            }
+        };
 
-//                 return ListResult<Ts...>(position, std::move(results));
-//             }
-//         };
+        template<typename T1, typename T2>
+        List<T1, T2> operator&(const Parser<T1>& _p1, const Parser<T2>& _p2) { return List<T1, T2>({ _p1, _p2 }); }
 
-//         template<typename T1, typename T2>
-//         ListPtr<T1, T2> operator&(ParserPtr<T1> _p1, ParserPtr<T2> _p2) { return std::make_shared<List<T1, T2>>({ _p1, _p2 }); }
+        template<typename... Head, typename Appendage>
+        List<Head..., Appendage> operator&(const List<Head...>& _head, const Parser<Appendage>& _appendage) { return List<Head..., Appendage>(std::tuple_cat(_head.GetParsers(), std::make_tuple(_appendage))); }
 
-//         template<typename... Head, typename Appendage>
-//         ListPtr<Head..., Appendage> operator&(ListPtr<Head...> _head, ParserPtr<Appendage> _appendage) { return std::make_shared<List<Head..., Appendage>>(std::tuple_cat(_head.GetParsers(), std::make_tuple(_appendage))); }
+        template<typename Appendage, typename... Tail>
+        List<Appendage, Tail...> operator&(const Parser<Appendage>& _appendage, const List<Tail...>& _tail) { return List<Appendage, Tail...>(std::tuple_cat(std::make_tuple(_appendage), _tail.GetParsers())); }
 
-//         template<typename Appendage, typename... Tail>
-//         ListPtr<Appendage, Tail...> operator&(ParserPtr<Appendage> _appendage, ListPtr<Tail...> _tail) { return std::make_shared<List<Appendage, Tail...>>(std::tuple_cat(std::make_tuple(_appendage), _tail.GetParsers())); }
-
-//         template<typename... Head, typename... Tail>
-//         ListPtr<Head..., Tail...> operator&(ListPtr<Head...> _head, ListPtr<Tail...> _tail) { return std::make_shared<List<Head..., Tail...>>(std::tuple_cat(_head.GetParsers(), _tail.GetParsers())); }
-// #pragma endregion
+        template<typename... Head, typename... Tail>
+        List<Head..., Tail...> operator&(const List<Head...>& _head, const List<Tail...>& _tail) { return List<Head..., Tail...>(std::tuple_cat(_head.GetParsers(), _tail.GetParsers())); }
+#pragma endregion
 
 // #pragma region Optional
 //         template<typename T>

@@ -31,16 +31,16 @@ namespace lpc
         }
     }
 
-    char StringStream::PeekChar()
+    char StringStream::Peek()
     {
         size_t initOffset = offset;
-        char peek = GetChar();
+        char peek = Get();
         offset = initOffset;
         return peek;
     }
 
-    char StringStream::GetChar() { return IsEOS() ? EOF : data[offset++]; }
-    void StringStream::IgnoreChars(size_t _amt) { offset = std::min(data.size(), offset + _amt); }
+    char StringStream::Get() { return IsEOS() ? EOF : data[offset++]; }
+    void StringStream::Ignore(size_t _amt) { offset = std::min(data.size(), offset + _amt); }
 
     void StringStream::SetOffset(size_t _offset) { offset = std::min(_offset, data.size()); } //Recall that size_t is unsigned so no need to bound below
     size_t StringStream::GetOffset() const { return offset; }
@@ -132,6 +132,10 @@ namespace lpc
     const Position& ParseError::GetPosition() const { return position; }
     const std::string& ParseError::GetMessage() const { return message; }
     const std::vector<ParseError>& ParseError::GetTrace() const { return trace; }
+
+    bool ParseError::operator==(const ParseError& _other) const { return position == _other.position && message == _other.message && trace == _other.trace; }
+    bool ParseError::operator!=(const ParseError& _other) const { return !(*this == _other); }
+
 
     ParseError ParseError::Expectation(const std::string& _expected, const std::string& _found, const Position& _pos)
     {
