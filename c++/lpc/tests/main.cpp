@@ -17,6 +17,12 @@ std::map<std::string, Test> tests =
             ASSERT(false);
         }
     },
+    {"Map", []()
+        {
+            auto parser = Parser<int>([](const Position& _pos, StringStream& _stream) { return ParseResult<int>(_pos, 5); });
+            ASSERT((Map<int, int>(parser, [](ParseResult<int>&& _input) { return 6; }).Parse("").value == 6));
+        }
+    },
     {"Reference", []()
         {
             Reference<char> reference;
@@ -34,12 +40,6 @@ std::map<std::string, Test> tests =
                 ASSERT(false);
             }
             catch (const ParseError& e) {}
-        }
-    },
-    {"Map", []()
-        {
-            auto parser = Parser<int>([](const Position& _pos, StringStream& _stream) { return ParseResult<int>(_pos, 5); });
-            ASSERT((Map<int, int>(parser, [](ParseResult<int>&& _input) { return 6; }).Parse("").value == 6));
         }
     },
     {"Try", []()
@@ -66,7 +66,7 @@ std::map<std::string, Test> tests =
             CountParser<char> parser = Count(Parser<char>([](const Position& _pos, StringStream& _stream)
             {
                 if (!std::isalpha(_stream.Peek()))
-                    throw ParseError(_pos, "Expected a letter");
+                    throw ParseError::Expectation("a letter", "'" + std::string(1, _stream.Peek()) + "'", _stream.GetPosition());
 
                 return ParseResult<char>(_pos, _stream.Get());
             }), 1, 3);
@@ -86,253 +86,249 @@ std::map<std::string, Test> tests =
                 ASSERT(value[0].position == Position(1, 4) && value[0].value == 'e');
                 ASSERT(value[1].position == Position(1, 5) && value[1].value == 'f');
 
-                stream.Ignore(1);
+                try
+                {
+                    parser.Parse(stream);
+                    ASSERT(false);
+                }
+                catch (const ParseError& e) { stream.Ignore(1); }
 
                 value = parser.Parse(stream).value;
                 ASSERT(value.size() == 1);
                 ASSERT(value[0].position == Position(1, 7) && value[0].value == 'g');
             }
             catch (const ParseError& e) { ASSERT(false); }
-
-            try
-            {
-                parser.Parse(stream);
-                ASSERT(false);
-            }
-            catch (const ParseError& e) {}
         }
     },
     {"ManyOrOne", []() { ASSERT(true); }}, //Derivative of Count
     {"ZeroOrOne", []() { ASSERT(true); }}, //Derivative of Count
     {"ZeroOrMore", []() { ASSERT(true); }}, //Derivative of Count
     {"Exactly", []() { ASSERT(true); }}, //Derivative of Count
-    {"List", []()
+    {"Seq", []()
         {
-            Parser<char> letter = Parser<char>([](const Position& _pos, StringStream& _stream)
-            {
-                if (!std::isalpha(_stream.Peek()))
-                    throw ParseError(_pos, "Expected a letter");
-
-                return ParseResult<char>(_pos, _stream.Get());
-            });
-
-            Parser<int> number = Parser<int>([](const Position& _pos, StringStream& _stream)
-            {
-                if (!std::isdigit(_stream.Peek()))
-                    throw ParseError(_pos, "Expected a digit");
-
-                return ParseResult<int>(_pos, int(_stream.Get() - '0'));
-            });
-
-            List<char, int, char> parser = List<char, int, char>(std::make_tuple(letter, number, letter));
-            auto [r1, r2, r3] = parser.Parse("a1c").value;
+            StringStream input("abc");
+            auto [r1, r2, r3] = Seq(Char('a'), Char('b'), Char('c')).Parse(input).value;
 
             ASSERT(r1.value == 'a');
             ASSERT(r2.value == 'b');
             ASSERT(r3.value == 'c');
+            ASSERT(input.GetOffset() == 3);
         }
     },
-    {"&", []()
+    {"Optional", []()
         {
-            auto [r1, r2, r3, r4, r5, r6] = ((Char('a') & (((Char('b') & Char('c')) & Char('d')) & (Char('e') & Char('f')))) << EOS())->Parse("abcdef").value;
+            StringStream input("123abc");
+            auto parser = Optional(Digits());
 
-            ASSERT(r1.value == 'a');
-            ASSERT(r2.value == 'b');
-            ASSERT(r3.value == 'c');
-            ASSERT(r4.value == 'd');
-            ASSERT(r5.value == 'e');
-            ASSERT(r6.value == 'f');
+            auto value = parser.Parse(input).value;
+            ASSERT(value.has_value() && value.value() == "123");
+
+            value = parser.Parse(input).value;
+            ASSERT(!value.has_value());
+
+            ASSERT(input.GetOffset() == 3);
         }
     },
-                    // {"Chain", []()
-                    //     {
-                    //         auto parser = Function<char>([](const Position& _pos, StringStream& _stream) { return ParseResult<char>(_pos, _stream.GetChar()); });
-                    //         ParserPtr<std::string> chain = Chain<char, std::string>(parser, [](ParseResult<char>&& _input)
-                    //         {
-                    //             return Function<std::string>([=](const Position& _pos, StringStream& _stream)
-                    //             {
-                    //                 return ParseResult<std::string>(_pos, std::string(1, _input.value));
-                    //             });
-                    //         });
+    {"Longest", []()
+        {
+            StringStream input("123 abc 123abc");
+            auto parser = Longest({Digits(), Letters(), Chars("123abc")});
 
-                    //         ASSERT(chain->Parse("5").value == "5");
-                    //         ASSERT(chain->Parse("6").value == "6");
-                    //     }
-                    // },
-                    // {"Satisfy", []()
-                    //     {
-                    //         auto parser = Function<int>([](const Position& _pos, StringStream& _stream) { return ParseResult<int>(_pos, 5); });
-                    //         auto onFail = [](const ParseResult<int>& _result) { return ParseError(_result.position, "Oh no!"); };
+            ASSERT(parser.Parse(input).value == "123");
+            input.Ignore(1);
+            ASSERT(parser.Parse(input).value == "abc");
+            input.Ignore(1);
+            ASSERT(parser.Parse(input).value == "123abc");
+        }
+    },
+    {"FirstSuccess", []()
+        {
+            StringStream input("123abc abc 123abc");
 
-                    //         ASSERT(Satisfy<int>(parser, 5, onFail)->Parse("").value == 5);
+            ASSERT(FirstSuccess({Letters(), Digits(), AlphaNums()}).Parse("123abc").value == "123");
+            ASSERT(FirstSuccess({Letters(), AlphaNums(), Digits()}).Parse("123abc").value == "123abc");
+            ASSERT(FirstSuccess({Letters(), AlphaNums(), Digits()}).Parse("qwe123abc").value == "qwe");
+        }
+    },
+    {"Variant", []()
+        {
+            using V = Variant<std::string, char, int>;
+            auto charParser = V::Create(Char());
+            auto stringParser = V::Create(Chars());
+            auto intParser = V::Create(Map<std::string, int>(Digits(),[](ParseResult<std::string>&& _result) { return std::stoi(_result.value); }));
 
-                    //         try
-                    //         {
-                    //             Satisfy<int>(parser, 6, onFail)->Parse("");
-                    //             ASSERT(false);
-                    //         }
-                    //         catch (const ParseError& e) {}
-                    //     }
-                    // },
-                    // {"Success", []()
-                    //     {
-                    //         ParserPtr<int> parser = Function<int>([](const Position& _pos, StringStream& _stream)
-                    //         {
-                    //             if (_stream.GetChar() == 'b')
-                    //                 throw ParseError(_pos, "");
+            ASSERT(charParser.Parse("123").value.Extract<char>().value == '1');
+            ASSERT(stringParser.Parse("123abc").value.Extract<std::string>().value == "123abc");
+            ASSERT(intParser.Parse("123abc").value.Extract<int>().value == 123);
+        }
+    },
+    {"Chain", []()
+        {
+            auto chain = Chain<std::string, int>(Digits(), [](ParseResult<std::string>&& _input)
+            {
+                return Parser<int>([=](const Position& _pos, StringStream& _stream)
+                {
+                    return ParseResult<int>(_pos, std::stoi(_input.value));
+                });
+            });
 
-                    //             return ParseResult<int>(_pos, 5);
-                    //         });
+            ASSERT(chain.Parse("5").value == 5);
+            ASSERT(chain.Parse("6").value == 6);
+        }
+    },
+    {"Satisfy", []()
+        {
+            auto parser = Parser<int>([](const Position& _pos, StringStream& _stream) { return ParseResult<int>(_pos, 5); });
+            auto onFail = [](const ParseResult<int>& _result) { return ParseError(_result.position, "Oh no!"); };
 
-                    //         ASSERT(Success(parser, 6)->Parse("a").value == 5);
-                    //         ASSERT(Success(parser, 6)->Parse("b").value == 6);
-                    //     }
-                    // },
-                    // {"Failure", []()
-                    //     {
-                    //         ParserPtr<int> parser = Function<int>([](const Position& _pos, StringStream& _stream)
-                    //         {
-                    //             if (_stream.PeekChar() == 'b')
-                    //                 throw ParseError(_pos, "");
+            ASSERT(Satisfy<int>(parser, 5, onFail).Parse("").value == 5);
 
-                    //             return ParseResult<int>(_pos, 5);
-                    //         });
+            try
+            {
+                Satisfy<int>(parser, 6, onFail).Parse("");
+                ASSERT(false);
+            }
+            catch (const ParseError& e) {}
+        }
+    },
+    {"Success", []()
+        {
+            auto parser = Parser<int>([](const Position& _pos, StringStream& _stream)
+            {
+                if (_stream.Get() == 'b')
+                    throw ParseError(_pos, "");
 
-                    //         try { Failure(parser)->Parse("b"); }
-                    //         catch (const ParseError& e) { ASSERT(false); }
+                return ParseResult<int>(_pos, 5);
+            });
 
-                    //         try
-                    //         {
-                    //             Failure(parser)->Parse("a");
-                    //             ASSERT(false);
-                    //         }
-                    //         catch (const ParseError& e) {}
-                    //     }
-                    // },
-                    // {"Lexeme", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"Char", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"Chars", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"Letter", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"Letters", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"Digit", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"Digits", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"AlphaNum", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"AlphaNums", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"Whitespace", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"Whitespaces", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"EOS", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"Error", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"Optional", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"BinopChain", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"Fold", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"Choice", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"Named", []() { ASSERT((Named("MyParser", Char()) << EOS())->Parse("a").value == 'a'); } },
-                    // {"Prefixed", []() { ASSERT((Prefixed(Digit(), Letter()) << EOS())->Parse("1b").value == 'b'); } },
-                    // {"Suffixed", []() { ASSERT((Suffixed(Letter(), Digit()) << EOS())->Parse("b1").value == 'b'); } },
-                    // {">>", []() { ASSERT((Digit() >> Letter() << EOS())->Parse("1b").value == 'b'); } },
-                    // {"<<", []() { ASSERT((Letter() << Digit() << EOS())->Parse("b1").value == 'b'); } },
-                    // {"+", []()
-                    //     {
-                    //         CountValue<char> results = ((Char('a') + (((Char('b') + Char('c')) + Char('d')) + (Char('e') + Char('f')))) << EOS())->Parse("abcdef").value;
+            ASSERT(Success(parser, 6).Parse("a").value == 5);
+            ASSERT(Success(parser, 6).Parse("b").value == 6);
+        }
+    },
+    {"Failure", []()
+        {
+            auto parser = Parser<int>([](const Position& _pos, StringStream& _stream)
+            {
+                if (_stream.Peek() == 'b')
+                    throw ParseError(_pos, "");
 
-                    //         ASSERT(results.size() == 6);
-                    //         ASSERT(results[0].value == 'a');
-                    //         ASSERT(results[1].value == 'b');
-                    //         ASSERT(results[2].value == 'c');
-                    //         ASSERT(results[3].value == 'd');
-                    //         ASSERT(results[4].value == 'e');
-                    //         ASSERT(results[5].value == 'f');
-                    //     }
-                    // },
-                    // {"|", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"||", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"Between", []() { ASSERT((Between(Char('a'), Char('b'), Char('c')) << EOS())->Parse("abc").value == 'b'); } },
-                    // {"LookAhead", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
-                    // {"Separate", []()
-                    //     {
-                    //         ASSERT(false);
-                    //     }
-                    // },
+                return ParseResult<int>(_pos, 5);
+            });
+
+            try { Failure(parser).Parse("b"); }
+            catch (const ParseError& e) { ASSERT(false); }
+
+            try
+            {
+                Failure(parser).Parse("a");
+                ASSERT(false);
+            }
+            catch (const ParseError& e) {}
+        }
+    },
+    {"Callback", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"Lexeme", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"Char", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"Chars", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"Letter", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"Letters", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"Digit", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"Digits", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"AlphaNum", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"AlphaNums", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"Whitespace", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"Whitespaces", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"EOS", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"BinopChain", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"Fold", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"Named", []() { ASSERT(Named("MyParser", Char()).Parse("a").value == 'a'); } },
+    {"Prefixed", []() { ASSERT(Prefixed(Digit(), Letter()).Parse("1b").value == 'b'); } },
+    {"Suffixed", []() { ASSERT(Suffixed(Letter(), Digit()).Parse("b1").value == 'b'); } },
+    {">>", []() { ASSERT((Digit() >> Letter()).Parse("1b").value == 'b'); } },
+    {"<<", []() { ASSERT((Letter() << Digit()).Parse("b1").value == 'b'); } },
+    {"Value", []()
+        {
+            StringStream input("gkyub");
+
+            ASSERT(Value(123).Parse(input).value == 123);
+            ASSERT(input.GetOffset() == 0);
+        }
+    },
+    {"Between", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"LookAhead", []()
+        {
+            ASSERT(false);
+        }
+    },
+    {"Separate", []()
+        {
+            ASSERT(false);
+        }
+    },
 };
 
 int main()

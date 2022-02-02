@@ -233,45 +233,45 @@ namespace lpc
         //     //             });
         // }
 
-        // ParserPtr<std::string> Lexeme(const Regex& _regex, std::optional<std::string> _value)
-        // {
-        //     return Function<std::string>([=](const Position& _pos, StringStream& _stream)
-        //         {
-        //             const char* current = &*_stream.CCurrent();
-        //             const char* end = &*_stream.CEnd();
-        //             std::cmatch regexMatch;
-        //             std::regex_search(current, end, regexMatch, _regex, std::regex_constants::match_continuous);
+        Parser<std::string> Lexeme(const Regex& _regex, std::optional<std::string> _value)
+        {
+            return Parser<std::string>([=](const Position& _pos, StringStream& _stream)
+                {
+                    const char* current = &*_stream.CCurrent();
+                    const char* end = &*_stream.CEnd();
+                    std::cmatch regexMatch;
+                    std::regex_search(current, end, regexMatch, _regex, std::regex_constants::match_continuous);
 
-        //             if (regexMatch.size() == 0)
-        //                 throw ParseError(_pos, "No match found for regular expression: " + _regex.GetString());
+                    if (regexMatch.size() == 0)
+                        throw ParseError(_pos, "No match found for regular expression: " + _regex.GetString());
 
-        //             std::string match = regexMatch.str();
+                    std::string match = regexMatch.str();
 
-        //             if (_value.has_value() && match != _value.value())
-        //                 throw ParseError::Expectation("'" + _value.value() + "'", "'" + match + "'", _pos);
+                    if (_value.has_value() && match != _value.value())
+                        throw ParseError::Expectation("'" + _value.value() + "'", "'" + match + "'", _pos);
 
-        //             _stream.IgnoreChars(match.length());
-        //             return ParseResult<std::string>(_pos, match);
-        //         });
-        // }
+                    _stream.Ignore(match.length());
+                    return ParseResult<std::string>(_pos, match);
+                });
+        }
 
-        // ParserPtr<std::string> Chars(std::optional<std::string> _value) { return Lexeme(Regex("[\\S\\s]+"), _value); }
-        // ParserPtr<std::string> Letters(std::optional<std::string> _value) { return Lexeme(Regex("[a-zA-Z]+"), _value); }
-        // ParserPtr<std::string> Digits(std::optional<std::string> _value) { return Lexeme(Regex("[0-9]+"), _value); }
-        // ParserPtr<std::string> AlphaNums(std::optional<std::string> _value) { return Lexeme(Regex("[a-zA-Z0-9]+"), _value); }
-        // ParserPtr<std::string> Whitespaces(std::optional<std::string> _value) { return Lexeme(Regex("\\s+"), _value); }
+        Parser<std::string> Chars(std::optional<std::string> _value) { return Lexeme(Regex("[\\S\\s]+"), _value); }
+        Parser<std::string> Letters(std::optional<std::string> _value) { return Lexeme(Regex("[a-zA-Z]+"), _value); }
+        Parser<std::string> Digits(std::optional<std::string> _value) { return Lexeme(Regex("[0-9]+"), _value); }
+        Parser<std::string> AlphaNums(std::optional<std::string> _value) { return Lexeme(Regex("[a-zA-Z0-9]+"), _value); }
+        Parser<std::string> Whitespaces(std::optional<std::string> _value) { return Lexeme(Regex("\\s+"), _value); }
 
-        // ParserPtr<char> Char(const Regex& _regex, std::optional<char> _value)
-        // {
-        //     std::optional<std::string> value = _value.has_value() ? std::optional(std::string(1, _value.value())) : std::nullopt;
-        //     return Map<std::string, char>(Lexeme(_regex, value), [](const ParseResult<std::string>& _result) { return _result.value[0]; });
-        // }
+        Parser<char> Char(const Regex& _regex, std::optional<char> _value)
+        {
+            std::optional<std::string> value = _value.has_value() ? std::optional(std::string(1, _value.value())) : std::nullopt;
+            return Map<std::string, char>(Lexeme(_regex, value), [](const ParseResult<std::string>& _result) { return _result.value[0]; });
+        }
 
-        // ParserPtr<char> Letter(std::optional<char> _value) { return Char(Regex("[a-zA-Z]"), _value); }
-        // ParserPtr<char> Digit(std::optional<char> _value) { return Char(Regex("[0-9]"), _value); }
-        // ParserPtr<char> AlphaNum(std::optional<char> _value) { return Char(Regex("[a-zA-Z0-9]"), _value); }
-        // ParserPtr<char> Whitespace(std::optional<char> _value) { return Char(Regex("\\s"), _value); }
-        // ParserPtr<char> Char(std::optional<char> _value) { return Char(Regex("[\\S\\s]"), _value); }
+        Parser<char> Letter(std::optional<char> _value) { return Char(Regex("[a-zA-Z]"), _value); }
+        Parser<char> Digit(std::optional<char> _value) { return Char(Regex("[0-9]"), _value); }
+        Parser<char> AlphaNum(std::optional<char> _value) { return Char(Regex("[a-zA-Z0-9]"), _value); }
+        Parser<char> Whitespace(std::optional<char> _value) { return Char(Regex("\\s"), _value); }
+        Parser<char> Char(std::optional<char> _value) { return Char(Regex("[\\S\\s]"), _value); }
 
         // ParserPtr<std::monostate> EOS()
         // {
