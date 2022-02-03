@@ -1,78 +1,117 @@
 #include <iostream>
 #include "rxd.h"
+#include "renderer.h"
 #include <chrono>
-#include <array>
+#include <cassert>
+#include <optional>
 
+using namespace rxd::renderer;
+using namespace rxd::utilities;
 using namespace rxd::math;
-using namespace rxd::Utilities;
-using namespace rxd::Renderer;
 
-struct ColorVertex : public Vertex<6>
+struct Ray
 {
-    ColorVertex(Vec2F64 _pos, Vec4F64 _col) : Vertex(_pos)
-    {
-        SetColor(_col);
-    }
+    Vec3F64 a, b;
 
-    ColorVertex() : ColorVertex(Vec2F64(), Vec4F64({ 0, 0, 0, 1 })) { }
+    Ray() : a(), b() { }
+    Ray(const Vec3F64& _a, const Vec3F64& _b) : a(_a), b(_b) { }
 
-    ColorVertex(const Vertex& _v) : Vertex(_v) { }
-
-    Vec4F64& GetColor() { return GetComponent<Vec4F64, 2>(); }
-    const Vec4F64& GetColor() const { return GetComponent<Vec4F64, 2>(); }
-    void SetColor(const Vec4F64& _value) { return SetComponent<Vec4F64, 2>(_value); }
+    Vec3F64 GetPoint(double _t) const { return a + _t * b; }
+    Vec3F64 GetDirection() const { return Normalize(b - a); }
 };
 
-PixelShader<ColorVertex> DefaultColorVertexPS() { return [](const ColorVertex& _v) { return _v.GetColor(); }; }
-
-struct TextureVertex : public Vertex<4>
+struct RayIntersectable
 {
-    TextureVertex(Vec2F64 _pos, Vec2F64 _texCoords) : Vertex(_pos)
-    {
-        SetTexCoords(_texCoords);
-    }
-
-    TextureVertex() : TextureVertex(Vec2F64(), Vec2F64()) { }
-
-    TextureVertex(const Vertex& _v) : Vertex(_v) { }
-
-    Vec2F64& GetTexCoords() { return GetComponent<Vec2F64, 2>(); }
-    const Vec2F64& GetTexCoords() const { return GetComponent<Vec2F64, 2>(); }
-    void SetTexCoords(const Vec2F64& _value) { return SetComponent<Vec2F64, 2>(_value); }
+    virtual ~RayIntersectable() { }
+    virtual std::optional<double> GetIntersection(const Ray& _ray) = 0;
+    virtual Color OnIntersect(const Vec3F64& _point) = 0;
 };
 
-PixelShader<TextureVertex> DefaultTextureVertexPS(rxd::Image* _texture)
+struct Sphere : public RayIntersectable
 {
-    return [_texture](const TextureVertex& _v)
+    Vec3F64 center;
+    double radius;
+
+    Sphere() : center(), radius(1) {}
+    Sphere(const Vec3F64& _center, double _radius) : center(_center), radius(_radius) { }
+
+    std::optional<double> GetIntersection(const Ray& _ray) override
     {
-        auto coords = _v.GetTexCoords();
-        int64_t x = std::ceil(coords[0] * (_texture->GetWidth() - 1));
-        int64_t y = std::ceil(coords[1] * (_texture->GetHeight() - 1));
-        return _texture->GetPixel(x, y);
-    };
+        Vec3F64 centerToRay = _ray.a - center;
+        double a = Dot(_ray.b, _ray.b);
+        double b = 2.0 * Dot(centerToRay, _ray.b);
+        double c = Dot(centerToRay, centerToRay) - radius * radius;
+        double discriminant = b * b - 4 * a * c;
+
+        if (discriminant < 0.0)
+            return std::nullopt;
+
+        double sqrtDiscriminant = std::sqrt(discriminant), aTimes2 = a * 2;
+        return std::min((-b + sqrtDiscriminant) / aTimes2, (-b - sqrtDiscriminant) / aTimes2);
+    }
+
+    Color OnIntersect(const Vec3F64& _point) override
+    {
+        return Color::Red();
+    }
+};
+
+struct Camera
+{
+    Vec3F64 position, up, right, forward;
+
+    Camera(Vec3F64 _pos = Vec3F64::Zero(), Vec3F64 _up = Vec3F64({ 0.0, 1.0, 0.0 }), Vec3F64 _right = Vec3F64({ 1.0, 0.0, 0.0 }), double _zNear = 1.0, double _zFar = 100.0)
+        : position(_pos), up(_up), right(_right), forward(Vec3F64({0.0, 0.0, -1.0}))
+    {
+        assert(_zNear > 0.0);
+        assert(_zFar >= _zNear);
+
+        zNear = _zNear;
+        zFar = _zFar;
+    }
+
+    Ray GetRay(double _portX, double _portY) const { return Ray(position, _portX * right + _portY * up + forward - position); }
+
+private:
+    double zNear, zFar;
+};
+
+Color CastRay(const Ray& _ray, const std::vector<RayIntersectable*>& _intersectables)
+{
+    RayIntersectable* closest = nullptr;
+    double t = 1.0;
+
+    for (auto intersectable : _intersectables)
+    {
+        auto intersection = intersectable->GetIntersection(_ray);
+        if (intersection.has_value() && (!closest || intersection.value() <= t))
+        {
+            closest = intersectable;
+            t = intersection.value();
+        }
+    }
+
+    if (closest) { return closest->OnIntersect(_ray.GetPoint(t)); }
+    else { return Lerp(Vec4F64({ 1.0, 1.0, 1.0, 1.0 }), Vec4F64({ 1.0, 0.5, 0.7, 1.0 }), (_ray.b[1] + 1.0) * 0.5); }
 }
 
 class Application : public rxd::Runnable
 {
     rxd::Window window;
-    Target* screen;
-    size_t UPS = 20, FPS = 60;
+    Target* target;
+    size_t UPS = 20, FPS = 20;
 
-    bool wireframe = false;
-
-    rxd::Bitmap* texture;
-    PixelShader<TextureVertex> ps;
+    Camera camera;
 
 public:
     Application() : window("RXD", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 600, 600 / 16 * 9)
     {
-        screen = new Target(new rxd::Screen(window, window.GetWidth() / 3, window.GetHeight() / 3), true);
+        target = new Target(new rxd::Screen(window, window.GetWidth(), window.GetHeight()));
     }
 
     ~Application()
     {
-        delete screen;
-        delete texture;
+        delete target;
     }
 
     void OnEvent(const SDL_Event& _event) override
@@ -82,13 +121,11 @@ public:
         case SDL_EventType::SDL_QUIT: Quit(); break;
         case SDL_EventType::SDL_KEYDOWN:
         {
-            if (_event.key.keysym.sym == SDL_KeyCode::SDLK_w)
-                wireframe = true;
+
         } break;
         case SDL_EventType::SDL_KEYUP:
         {
-            if (_event.key.keysym.sym == SDL_KeyCode::SDLK_w)
-                wireframe = false;
+
         } break;
         default: break;
         }
@@ -99,11 +136,6 @@ protected:
     {
         std::cout << "Application Started" << std::endl;
         window.Show();
-
-        texture = new rxd::Bitmap("/Users/rayshardthompson/Documents/GitHub/libraries/c++/rxd/texture.png");
-        texture->SetPixel(0, 0, Color::Red());
-
-        ps = DefaultTextureVertexPS(texture);
     }
 
     void OnRun() override
@@ -163,34 +195,33 @@ private:
 
     void Render()
     {
-        using namespace rxd::Utilities;
+        using namespace rxd::utilities;
 
-        screen->ClearDepthBuffer();
-        screen->As<rxd::Screen>().Fill(Color{ 255, 128, 128, 128 });
+        rxd::Screen& screen = target->As<rxd::Screen>();
+        //screen.Fill(Color{ 255, 0, 0, 255 });
 
-        //ColorVertex::VertexShader<ColorVertex> vs = [](const ColorVertex& _v) { return _v; };
-        VertexShader<TextureVertex, TextureVertex> vs = [](const TextureVertex& _v) { return _v; };
+        int64_t screenWidth = (int64_t)screen.GetWidth(), screenHeight = (int64_t)screen.GetHeight();
+        int64_t screenWidthM1 = screenWidth - 1, screenHeightM1 = screenHeight - 1;
 
-        // auto v1 = ColorVertex({ 0.25, 0.25 }, Color::Red().ToVec4F64());
-        // auto v2 = ColorVertex({ 0.75, 0.25 }, Color::Green().ToVec4F64());
-        // auto v3 = ColorVertex({ 0.75, 0.75 }, Color::Blue().ToVec4F64());
-        // auto v4 = ColorVertex({ 0.25, 0.75 }, Color::White().ToVec4F64());
+        Sphere sphere = Sphere(Vec3F64({ 0.0, 0.0, -1.0 }), 0.5);
+        std::vector<RayIntersectable*> world = { &sphere };
 
-        std::vector<TextureVertex> vertices =
+        for (int64_t yPix = screenHeightM1; yPix >= 0; --yPix)
         {
-            TextureVertex(Vec2F64({ -0.25, -0.25 }), Vec2F64({ 0.0, 0.0 })),
-            TextureVertex(Vec2F64({ +0.25, -0.25 }), Vec2F64({ 1.0, 0.0 })),
-            TextureVertex(Vec2F64({ +0.25, +0.25 }), Vec2F64({ 1.0, 1.0 })),
-            TextureVertex(Vec2F64({ -0.25, +0.25 }), Vec2F64({ 0.0, 1.0 }))
-        };
+            double v = yPix / -(double)screenHeightM1 * 2.0 + 1.0;
+            //double v = yPix / (double)screenHeightM1;
 
-        auto mesh = Mesh<TextureVertex>(std::move(vertices), { {0, 1, 2}, {0, 2, 3} });
+            for (int64_t xPix = 0; xPix < screenWidth; ++xPix)
+            {
+                double u = xPix / (double)screenWidthM1 * 2.0 - 1.0;
+                //double u = xPix / (double)screenWidthM1;
+                
+                screen.SetPixel(xPix, yPix, CastRay(camera.GetRay(u, v), world));
+            }
+        }
 
-        for (int i = 0; i < 1; i++)
-            Rasterize(screen, mesh.GenerateTriangles(), ps);
-
-        screen->As<rxd::Screen>().Update();
-        window.FlipScreen(screen->As<rxd::Screen>());
+        screen.Update();
+        window.FlipScreen(screen);
     }
 };
 

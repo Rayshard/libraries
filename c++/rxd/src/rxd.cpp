@@ -69,11 +69,6 @@ namespace rxd
     bool Runnable::IsRunning() const { return running; }
 #pragma endregion
 
-    namespace Utilities
-    {
-        
-    }
-
 #pragma region Bitmap
     Bitmap::Bitmap(uint64_t _width, uint64_t _height) : surface(nullptr)
     {
@@ -122,7 +117,7 @@ namespace rxd
 
     Bitmap::~Bitmap() { SDL_FreeSurface(surface); }
 
-    void Bitmap::Fill(Utilities::Color _color) { SDL_FillRect(surface, NULL, SDL_MapRGBA(surface->format, _color.r, _color.g, _color.b, _color.a)); }
+    void Bitmap::Fill(utilities::Color _color) { SDL_FillRect(surface, NULL, SDL_MapRGBA(surface->format, _color.r, _color.g, _color.b, _color.a)); }
     void Bitmap::Blit(const Bitmap& _bitmap) { SDL_BlitSurface(_bitmap.surface, NULL, surface, NULL); }
 
     Bitmap& Bitmap::operator=(const Bitmap& _b)
@@ -144,17 +139,17 @@ namespace rxd
         return *this;
     }
 
-    Utilities::Color Bitmap::GetPixel(int64_t _x, int64_t _y)
+    utilities::Color Bitmap::GetPixel(int64_t _x, int64_t _y)
     {
         if (_x < 0 || _x >= (int64_t)GetWidth() || _y < 0 || _y >= (int64_t)GetHeight())
-            return Utilities::Color::Clear();
+            return utilities::Color::Clear();
 
-        Utilities::Color color;
+        utilities::Color color;
         SDL_GetRGBA(((Uint32*)surface->pixels)[_x + _y * surface->w], surface->format, &color.r, &color.g, &color.b, &color.a);
         return color;
     }
 
-    void Bitmap::SetPixel(int64_t _x, int64_t _y, Utilities::Color _color)
+    void Bitmap::SetPixel(int64_t _x, int64_t _y, utilities::Color _color)
     {
         if (_x < 0 || _x >= (int64_t)GetWidth() || _y < 0 || _y >= (int64_t)GetHeight())
             return;

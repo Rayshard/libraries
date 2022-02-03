@@ -10,11 +10,10 @@ namespace rxd::math
 
     template<size_t D, typename T>
         requires (D > 0)
-    class Vector
+    struct Vector
     {
         std::array<T, D> components;
 
-    public:
         Vector() : components() { }
         Vector(T _value) { components.fill(_value); }
         Vector(const std::array<T, D>& _components) : components(_components) { }
@@ -65,7 +64,7 @@ namespace rxd::math
         Vector<D, T> result;
 
         for (size_t i = 0; i < D; ++i)
-            result[i] = _left[i] + _right[i];
+            result[i] = _left[i] - _right[i];
 
         return result;
     }
@@ -176,6 +175,20 @@ namespace rxd::math
     double Length(const Vector<D, T>& _v) { return std::sqrt(LengthSquared(_v)); }
 
     template<size_t D, typename T>
+    double Dot(const Vector<D, T>& _a, const Vector<D, T>& _b)
+    {
+        double result = 0;
+
+        for (size_t i = 0; i < D; ++i)
+            result += _a[i] * _b[i];
+
+        return result;
+    }
+
+    template<size_t D, typename T>
+    Vector<D, T> Normalize(const Vector<D, T>& _v) { return _v / Length(_v); }
+
+    template<size_t D, typename T>
     Vector<D, T> Lerp(const Vector<D, T>& _a, const Vector<D, T>& _b, double _amt)
     {
         Vector<D, T> result;
@@ -205,5 +218,6 @@ namespace rxd::math
     std::ostream& operator<<(std::ostream& _lhs, const Vector<D, T>& _rhs) { return _lhs << ToString(_rhs); }
 
     typedef Vector<2, double> Vec2F64;
+    typedef Vector<3, double> Vec3F64;
     typedef Vector<4, double> Vec4F64;
 }

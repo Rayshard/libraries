@@ -1,11 +1,11 @@
 CC = g++-11
-CFLAGS = -std=c++2a -Wall -Wno-unknown-pragmas
+CFLAGS = -std=c++2a -Wall -Wno-unknown-pragmas -O3
 LINKER_FLAGS = 
 LIBRARY_PATHS = 
 
 build:
 	$(eval INCLUDE_PATHS = -I $(NAME))
-	$(eval SRC_FILES = $(wildcard $(NAME)/*.cpp) $(wildcard $(NAME)/tests/*.cpp))
+	$(eval SRC_FILES = $(wildcard $(NAME)/src/*.cpp) $(wildcard $(NAME)/tests/*.cpp))
 
 ifeq ($(NAME), rxd)
 	$(eval INCLUDE_PATHS = -Irxd/include -Irxd/include/SDL2 -Irxd/include/SDL2_image)

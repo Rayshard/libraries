@@ -7,7 +7,6 @@
 #include <vector>
 #include <concepts>
 #include "math.h"
-#include <iostream> //TODO: Remove
 
 //TODO: Move to cpp file
 #define CHECK_SDL(value, message) do { if (!(value)) throw std::runtime_error(std::string(message) + " Error:\n" + SDL_GetError()); } while(false)
@@ -41,7 +40,7 @@ namespace rxd
     void Quit();
     void CleanUp();
 
-    namespace Utilities
+    namespace utilities
     {
         struct Color
         {
@@ -67,8 +66,8 @@ namespace rxd
     {
         virtual ~Image() { }
 
-        virtual Utilities::Color GetPixel(int64_t _x, int64_t _y) = 0;
-        virtual void SetPixel(int64_t _x, int64_t _y, Utilities::Color _col) = 0;
+        virtual utilities::Color GetPixel(int64_t _x, int64_t _y) = 0;
+        virtual void SetPixel(int64_t _x, int64_t _y, utilities::Color _col) = 0;
 
         virtual uint64_t GetWidth() = 0;
         virtual uint64_t GetHeight() = 0;
@@ -91,11 +90,11 @@ namespace rxd
 
         virtual ~Bitmap();
 
-        void Fill(Utilities::Color _color);
+        void Fill(utilities::Color _color);
         void Blit(const Bitmap& _bitmap);
 
-        Utilities::Color GetPixel(int64_t _x, int64_t _y) override;
-        void SetPixel(int64_t _x, int64_t _y, Utilities::Color _col) override;
+        utilities::Color GetPixel(int64_t _x, int64_t _y) override;
+        void SetPixel(int64_t _x, int64_t _y, utilities::Color _col) override;
 
         Bitmap& operator=(const Bitmap& _b);
         Bitmap& operator=(Bitmap&& _b) noexcept;
