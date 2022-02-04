@@ -111,55 +111,20 @@ namespace rxd
         };
     };
 
-    class Screen;
-
     class Window
     {
         SDL_Window* instance;
         SDL_Renderer* renderer;
+        SDL_Texture* screen;
 
     public:
         Window(std::string _title, uint64_t _x, uint64_t _y, uint64_t _width, uint64_t _height);
         virtual ~Window();
 
         void Show();
-        void FlipScreen(const Screen& _screen);
+        void FlipScreen(const Bitmap& _screen);
 
         uint64_t GetWidth() const;
         uint64_t GetHeight() const;
-
-        class Internal
-        {
-            friend class Screen;
-
-            static SDL_Renderer* GetRenderer(const Window& _window) { return _window.renderer; }
-        };
-    };
-
-    class Screen : public Bitmap
-    {
-        SDL_Texture* texture;
-
-    public:
-        Screen(Window& _window, uint64_t _width, uint64_t _height) : Bitmap(_width, _height)
-        {
-            texture = SDL_CreateTexture(Window::Internal::GetRenderer(_window), surface->format->format, SDL_TEXTUREACCESS_STREAMING, GetWidth(), GetHeight());
-            CHECK_SDL(texture, "Could not create texture!");
-        }
-
-        Screen(const Screen&) = delete;
-        Screen& operator= (const Screen&) = delete;
-
-        virtual ~Screen() { SDL_DestroyTexture(texture); }
-
-        void Update() { SDL_UpdateTexture(texture, NULL, surface->pixels, surface->pitch); }
-        Bitmap Capture() { return Bitmap(*this); }
-
-        class Internal
-        {
-            friend class Window;
-
-            static SDL_Texture* GetTexture(const Screen& _screen) { return _screen.texture; }
-        };
     };
 }

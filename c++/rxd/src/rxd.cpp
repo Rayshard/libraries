@@ -171,19 +171,26 @@ namespace rxd
 
         renderer = SDL_CreateRenderer(instance, -1, SDL_RENDERER_ACCELERATED);
         CHECK_SDL(renderer, "Could not create window renderer!");
+
+        screen = SDL_CreateTexture(renderer, pixelFormat->format, SDL_TEXTUREACCESS_STREAMING, GetWidth(), GetHeight());
+        CHECK_SDL(screen, "Could not create window screen!");
     }
 
     Window::~Window()
     {
+        SDL_DestroyTexture(screen);
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(instance);
     }
 
     void Window::Show() { SDL_ShowWindow(instance); }
 
-    void Window::FlipScreen(const Screen& _screen)
+    void Window::FlipScreen(const Bitmap& _screen)
     {
-        SDL_RenderCopy(renderer, Screen::Internal::GetTexture(_screen), NULL, NULL);
+        SDL_Surface* surface = Bitmap::Internal::GetSurface(_screen);
+
+        SDL_UpdateTexture(screen, NULL, surface->pixels, surface->pitch);
+        SDL_RenderCopy(renderer, screen, NULL, NULL);
         SDL_RenderPresent(renderer);
     }
 

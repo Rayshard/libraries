@@ -16,7 +16,7 @@ struct Ray
     Ray() : a(), b() { }
     Ray(const Vec3F64& _a, const Vec3F64& _b) : a(_a), b(_b) { }
 
-    Vec3F64 GetPoint(double _t) const { return a + _t * b; }
+    Vec3F64 GetPoint(double _t) const { return (1 - _t) * a + _t * b; }
     Vec3F64 GetDirection() const { return Normalize(b - a); }
 };
 
@@ -37,9 +37,9 @@ struct Sphere : public RayIntersectable
 
     std::optional<double> GetIntersection(const Ray& _ray) override
     {
-        Vec3F64 centerToRay = _ray.a - center;
-        double a = Dot(_ray.b, _ray.b);
-        double b = 2.0 * Dot(centerToRay, _ray.b);
+        Vec3F64 centerToRay = _ray.a - center, rayBMinusA = _ray.b - _ray.a;
+        double a = Dot(rayBMinusA, rayBMinusA);
+        double b = 2.0 * Dot(centerToRay, rayBMinusA);
         double c = Dot(centerToRay, centerToRay) - radius * radius;
         double discriminant = b * b - 4 * a * c;
 
@@ -61,7 +61,7 @@ struct Camera
     Vec3F64 position, up, right, forward;
 
     Camera(Vec3F64 _pos = Vec3F64::Zero(), Vec3F64 _up = Vec3F64({ 0.0, 1.0, 0.0 }), Vec3F64 _right = Vec3F64({ 1.0, 0.0, 0.0 }), double _zNear = 1.0, double _zFar = 100.0)
-        : position(_pos), up(_up), right(_right), forward(Vec3F64({0.0, 0.0, -1.0}))
+        : position(_pos), up(_up), right(_right), forward(Vec3F64({ 0.0, 0.0, -1.0 }))
     {
         assert(_zNear > 0.0);
         assert(_zFar >= _zNear);
@@ -70,7 +70,10 @@ struct Camera
         zFar = _zFar;
     }
 
-    Ray GetRay(double _portX, double _portY) const { return Ray(position, _portX * right + _portY * up + forward - position); }
+    Ray GetRay(double _portX, double _portY) const
+    {
+        return Ray(position, _portX * right + _portY * up + forward - position);
+    }
 
 private:
     double zNear, zFar;
@@ -84,7 +87,7 @@ Color CastRay(const Ray& _ray, const std::vector<RayIntersectable*>& _intersecta
     for (auto intersectable : _intersectables)
     {
         auto intersection = intersectable->GetIntersection(_ray);
-        if (intersection.has_value() && (!closest || intersection.value() <= t))
+        if (intersection.has_value() && intersection.value() >= 0.0 && intersection.value() <= t)
         {
             closest = intersectable;
             t = intersection.value();
@@ -92,13 +95,13 @@ Color CastRay(const Ray& _ray, const std::vector<RayIntersectable*>& _intersecta
     }
 
     if (closest) { return closest->OnIntersect(_ray.GetPoint(t)); }
-    else { return Lerp(Vec4F64({ 1.0, 1.0, 1.0, 1.0 }), Vec4F64({ 1.0, 0.5, 0.7, 1.0 }), (_ray.b[1] + 1.0) * 0.5); }
+    else { return Lerp(Vec4F64({ 1.0, 1.0, 1.0, 1.0 }), Vec4F64({ 1.0, 0.5, 0.7, 1.0 }), (_ray.GetDirection()[1] + 1.0) * 0.5); }
 }
 
 class Application : public rxd::Runnable
 {
     rxd::Window window;
-    Target* target;
+    rxd::Bitmap target;
     size_t UPS = 20, FPS = 20;
 
     Camera camera;
@@ -106,12 +109,12 @@ class Application : public rxd::Runnable
 public:
     Application() : window("RXD", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 600, 600 / 16 * 9)
     {
-        target = new Target(new rxd::Screen(window, window.GetWidth(), window.GetHeight()));
+        target = rxd::Bitmap(window.GetWidth(), window.GetHeight());
     }
 
     ~Application()
     {
-        delete target;
+
     }
 
     void OnEvent(const SDL_Event& _event) override
@@ -197,31 +200,27 @@ private:
     {
         using namespace rxd::utilities;
 
-        rxd::Screen& screen = target->As<rxd::Screen>();
         //screen.Fill(Color{ 255, 0, 0, 255 });
 
-        int64_t screenWidth = (int64_t)screen.GetWidth(), screenHeight = (int64_t)screen.GetHeight();
+        int64_t screenWidth = (int64_t)target.GetWidth(), screenHeight = (int64_t)target.GetHeight();
         int64_t screenWidthM1 = screenWidth - 1, screenHeightM1 = screenHeight - 1;
 
-        Sphere sphere = Sphere(Vec3F64({ 0.0, 0.0, -1.0 }), 0.5);
+        Sphere sphere = Sphere(Vec3F64({ 0.0, 0.0, -5.0 }), 1.0);
         std::vector<RayIntersectable*> world = { &sphere };
 
         for (int64_t yPix = screenHeightM1; yPix >= 0; --yPix)
         {
             double v = yPix / -(double)screenHeightM1 * 2.0 + 1.0;
-            //double v = yPix / (double)screenHeightM1;
 
             for (int64_t xPix = 0; xPix < screenWidth; ++xPix)
             {
                 double u = xPix / (double)screenWidthM1 * 2.0 - 1.0;
-                //double u = xPix / (double)screenWidthM1;
-                
-                screen.SetPixel(xPix, yPix, CastRay(camera.GetRay(u, v), world));
+
+                target.SetPixel(xPix, yPix, CastRay(camera.GetRay(u, v), world));
             }
         }
 
-        screen.Update();
-        window.FlipScreen(screen);
+        window.FlipScreen(target);
     }
 };
 

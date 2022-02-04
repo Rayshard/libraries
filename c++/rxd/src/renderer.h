@@ -3,33 +3,6 @@
 
 namespace rxd::renderer
 {
-    class Target : public Image
-    {
-        Image* image;
-
-    public:
-        Target(Image* _image) : image(_image) { }
-
-        Target(const Target&) = delete;
-        Target& operator= (const Target&) = delete;
-
-        virtual ~Target() { delete image; }
-
-        utilities::Color GetPixel(int64_t _x, int64_t _y) { return image->GetPixel(_x, _y); }
-        void SetPixel(int64_t _x, int64_t _y, utilities::Color _col) { image->SetPixel(_x, _y, _col); }
-
-        uint64_t GetWidth() { return image->GetWidth(); }
-        uint64_t GetHeight() { return image->GetHeight(); };
-
-        template<typename T>
-            requires std::derived_from<T, Image>
-        T& As() { return *(T*)image; }
-
-        template<typename T>
-            requires std::derived_from<T, Image>
-        const T& As() const { return *(T*)image; }
-    };
-
     struct IVertex
     {
         virtual ~IVertex() { };
