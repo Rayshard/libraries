@@ -24,16 +24,43 @@ struct RayIntersectable
 {
     virtual ~RayIntersectable() { }
     virtual std::optional<double> GetIntersection(const Ray& _ray) = 0;
-    virtual Color OnIntersect(const Vec3F64& _point) = 0;
+    virtual Color OnIntersect(const Vec3F64& _point, const std::vector<RayIntersectable*>& _intersectables) = 0;
 };
+
+
+struct RayIntersection
+{
+    RayIntersectable* intersectable;
+    Vec3F64 point;
+};
+
+std::optional<RayIntersection> CastRay(const Ray& _ray, const std::vector<RayIntersectable*>& _intersectables)
+{
+    RayIntersectable* closest = nullptr;
+    double t = 1.0;
+
+    for (auto intersectable : _intersectables)
+    {
+        auto intersection = intersectable->GetIntersection(_ray);
+        if (intersection.has_value() && intersection.value() >= 0.0 && intersection.value() <= t)
+        {
+            closest = intersectable;
+            t = intersection.value();
+        }
+    }
+
+    if (closest) { return RayIntersection{ closest, _ray.GetPoint(t) }; }
+    else { return std::nullopt; }
+}
 
 struct Sphere : public RayIntersectable
 {
     Vec3F64 center;
     double radius;
+    Color color;
 
-    Sphere() : center(), radius(1) {}
-    Sphere(const Vec3F64& _center, double _radius) : center(_center), radius(_radius) { }
+    Sphere() : center(), radius(1), color(Color::White()) {}
+    Sphere(const Vec3F64& _center, double _radius, const Color& _color) : center(_center), radius(_radius), color(_color) { }
 
     std::optional<double> GetIntersection(const Ray& _ray) override
     {
@@ -50,9 +77,22 @@ struct Sphere : public RayIntersectable
         return std::min((-b + sqrtDiscriminant) / aTimes2, (-b - sqrtDiscriminant) / aTimes2);
     }
 
-    Color OnIntersect(const Vec3F64& _point) override
+    Color OnIntersect(const Vec3F64& _point, const std::vector<RayIntersectable*>& _intersectables) override
     {
-        return Color::Red();
+        Vec3F64 lightPos = Vec3F64({ 0.0, 10.0, 0.0 });
+        Ray pointToLight = Ray(Ray(_point, lightPos).GetPoint(0.001), lightPos);
+        double ambience = 0.1, diffuse;
+
+        auto intersection = CastRay(pointToLight, _intersectables);
+
+        if (!intersection.has_value())
+        {
+            Vec3F64 normal = Normalize(_point - center), lightToPoint = Normalize(lightPos - _point);
+            diffuse = std::min(1.0, std::max(0.0, Dot(normal, lightToPoint)) + ambience);
+        }
+        else { diffuse = ambience; }
+
+        return Vec4F64({ 1.0, color.r / 255.0 * diffuse, color.g / 255.0 * diffuse, color.b / 255.0 * diffuse });
     }
 };
 
@@ -60,43 +100,56 @@ struct Camera
 {
     Vec3F64 position, up, right, forward;
 
-    Camera(Vec3F64 _pos = Vec3F64::Zero(), Vec3F64 _up = Vec3F64({ 0.0, 1.0, 0.0 }), Vec3F64 _right = Vec3F64({ 1.0, 0.0, 0.0 }), double _zNear = 1.0, double _zFar = 100.0)
-        : position(_pos), up(_up), right(_right), forward(Vec3F64({ 0.0, 0.0, -1.0 }))
+    Camera(Vec3F64 _pos = Vec3F64::Zero(), Vec3F64 _up = Vec3F64({ 0.0, 1.0, 0.0 }), Vec3F64 _right = Vec3F64({ 1.0, 0.0, 0.0 }), double _fov = M_PI_2, double _zNear = 1.0, double _zFar = 100.0)
+        : position(_pos), up(_up), right(_right), forward(Vec3F64({ 0.0, 0.0, -1.0 })), fov(_fov), aspectRatio(1.0), zNear(_zNear), zFar(_zFar)
     {
-        assert(_zNear > 0.0);
-        assert(_zFar >= _zNear);
+        UpdateViewportDimensions();
+    }
 
-        zNear = _zNear;
-        zFar = _zFar;
+    double GetFOV() const { return fov; }
+    double GetAspectRatio() const { return aspectRatio; }
+    double GetZNear() const { return zNear; }
+    double GetZFar() const { return zFar; }
+
+    void SetFOV(double _value)
+    {
+        fov = _value;
+        UpdateViewportDimensions();
+    }
+
+    void SetAspectRatio(double _value)
+    {
+        aspectRatio = _value;
+        UpdateViewportDimensions();
+    }
+
+    void SetZNear(double _value)
+    {
+        zNear = _value;
+        UpdateViewportDimensions();
+    }
+
+    void SetZFar(double _value)
+    {
+        zFar = _value;
+        UpdateViewportDimensions();
     }
 
     Ray GetRay(double _portX, double _portY) const
     {
-        return Ray(position, _portX * right + _portY * up + forward - position);
+        Vec3F64 portPoint = Normalize(forward + _portX * portHalfWidth * right + _portY * portHalfHeight * up);
+        return Ray(position + portPoint * zNear, position + portPoint * zFar);
     }
 
 private:
-    double zNear, zFar;
-};
+    double fov, aspectRatio, zNear, zFar, portHalfWidth, portHalfHeight;
 
-Color CastRay(const Ray& _ray, const std::vector<RayIntersectable*>& _intersectables)
-{
-    RayIntersectable* closest = nullptr;
-    double t = 1.0;
-
-    for (auto intersectable : _intersectables)
+    void UpdateViewportDimensions()
     {
-        auto intersection = intersectable->GetIntersection(_ray);
-        if (intersection.has_value() && intersection.value() >= 0.0 && intersection.value() <= t)
-        {
-            closest = intersectable;
-            t = intersection.value();
-        }
+        portHalfWidth = zNear * std::tan(fov / 2.0);
+        portHalfHeight = portHalfWidth / aspectRatio;
     }
-
-    if (closest) { return closest->OnIntersect(_ray.GetPoint(t)); }
-    else { return Lerp(Vec4F64({ 1.0, 1.0, 1.0, 1.0 }), Vec4F64({ 1.0, 0.5, 0.7, 1.0 }), (_ray.GetDirection()[1] + 1.0) * 0.5); }
-}
+};
 
 class Application : public rxd::Runnable
 {
@@ -107,9 +160,9 @@ class Application : public rxd::Runnable
     Camera camera;
 
 public:
-    Application() : window("RXD", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 600, 600 / 16 * 9)
+    Application() : window("RXD", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 600, 600 / 16 * 9, 300), target()
     {
-        target = rxd::Bitmap(window.GetWidth(), window.GetHeight());
+
     }
 
     ~Application()
@@ -119,6 +172,8 @@ public:
 
     void OnEvent(const SDL_Event& _event) override
     {
+        window.HandleEvent(_event);
+
         switch (_event.type)
         {
         case SDL_EventType::SDL_QUIT: Quit(); break;
@@ -200,27 +255,54 @@ private:
     {
         using namespace rxd::utilities;
 
-        //screen.Fill(Color{ 255, 0, 0, 255 });
-
-        int64_t screenWidth = (int64_t)target.GetWidth(), screenHeight = (int64_t)target.GetHeight();
-        int64_t screenWidthM1 = screenWidth - 1, screenHeightM1 = screenHeight - 1;
-
-        Sphere sphere = Sphere(Vec3F64({ 0.0, 0.0, -5.0 }), 1.0);
-        std::vector<RayIntersectable*> world = { &sphere };
-
-        for (int64_t yPix = screenHeightM1; yPix >= 0; --yPix)
+        struct PixelRay
         {
-            double v = yPix / -(double)screenHeightM1 * 2.0 + 1.0;
+            int64_t pixelX, pixelY;
+            Ray ray;
+        };
 
-            for (int64_t xPix = 0; xPix < screenWidth; ++xPix)
+        static std::vector<PixelRay> pixelRays = std::vector<PixelRay>();
+
+        Sphere sphere = Sphere(Vec3F64({ 0.0, 0.0, -5.0 }), 1.0, Color::Red());
+        Sphere floor = Sphere(Vec3F64({ 0.0, -1000.0, 0.0 }), 999.0, Color::Green());
+        std::vector<RayIntersectable*> world = { &sphere, &floor };
+
+        if (target.GetWidth() != window.GetScreenWidth() || target.GetHeight() != window.GetScreenHeight())
+        {
+            target = rxd::Bitmap(window.GetScreenWidth(), window.GetScreenHeight());
+
+            int64_t screenWidth = (int64_t)target.GetWidth(), screenHeight = (int64_t)target.GetHeight();
+            int64_t screenWidthM1 = screenWidth - 1, screenHeightM1 = screenHeight - 1;
+
+            camera.SetAspectRatio((double)screenWidth / screenHeight);
+            pixelRays = std::vector<PixelRay>(screenWidth * screenHeight);
+
+            for (int64_t yPix = screenHeightM1; yPix >= 0; --yPix)
             {
-                double u = xPix / (double)screenWidthM1 * 2.0 - 1.0;
+                double v = yPix / -(double)screenHeightM1 * 2.0 + 1.0;
 
-                target.SetPixel(xPix, yPix, CastRay(camera.GetRay(u, v), world));
+                for (int64_t xPix = 0; xPix < screenWidth; ++xPix)
+                {
+                    double u = xPix / (double)screenWidthM1 * 2.0 - 1.0;
+
+                    pixelRays[xPix + yPix * screenWidth] = PixelRay{ xPix, yPix, camera.GetRay(u, v) };
+                }
             }
         }
 
-        window.FlipScreen(target);
+        for (auto& pr : pixelRays)
+        {
+            Color color;
+
+            auto intersection = CastRay(pr.ray, world);
+
+            if (intersection.has_value()) { color = intersection.value().intersectable->OnIntersect(intersection.value().point, world); }
+            else { color = Lerp(Vec4F64({ 1.0, 1.0, 1.0, 1.0 }), Vec4F64({ 1.0, 0.5, 0.7, 1.0 }), (pr.ray.GetDirection()[1] + 1.0) * 0.5); }
+
+            target.SetPixel(pr.pixelX, pr.pixelY, color);
+        }
+
+        window.FlipScreenBuffer(target);
     }
 };
 

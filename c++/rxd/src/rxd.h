@@ -115,16 +115,25 @@ namespace rxd
     {
         SDL_Window* instance;
         SDL_Renderer* renderer;
+
         SDL_Texture* screen;
+        uint64_t screenResolution;
 
     public:
-        Window(std::string _title, uint64_t _x, uint64_t _y, uint64_t _width, uint64_t _height);
+        Window(std::string _title, uint64_t _x, uint64_t _y, uint64_t _width, uint64_t _height, uint64_t screenResolution);
         virtual ~Window();
 
         void Show();
-        void FlipScreen(const Bitmap& _screen);
+        void HandleEvent(const SDL_Event& _event);
+        void FlipScreenBuffer(const Bitmap& _buffer);
 
         uint64_t GetWidth() const;
         uint64_t GetHeight() const;
+        uint64_t GetScreenWidth() const;
+        uint64_t GetScreenHeight() const;
+        double GetAspectRatio() const;
+
+    private:
+        void UpdateScreen();
     };
 }
