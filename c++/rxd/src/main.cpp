@@ -53,6 +53,18 @@ std::optional<RayIntersection> CastRay(const Ray& _ray, const std::vector<RayInt
     else { return std::nullopt; }
 }
 
+std::optional<RayIntersection> CastShadowRay(const Ray& _ray, const std::vector<RayIntersectable*>& _intersectables)
+{
+    for (auto intersectable : _intersectables)
+    {
+        auto intersection = intersectable->GetIntersection(_ray);
+        if (intersection.has_value() && intersection.value() >= 0.0 && intersection.value() <= 1.0)
+            return RayIntersection{ intersectable, _ray.GetPoint(intersection.value()) };
+    }
+
+    return std::nullopt;
+}
+
 struct Sphere : public RayIntersectable
 {
     Vec3F64 center;
@@ -83,7 +95,7 @@ struct Sphere : public RayIntersectable
         Ray pointToLight = Ray(Ray(_point, lightPos).GetPoint(0.001), lightPos);
         double ambience = 0.1, diffuse;
 
-        auto intersection = CastRay(pointToLight, _intersectables);
+        auto intersection = CastShadowRay(pointToLight, _intersectables);
 
         if (!intersection.has_value())
         {
