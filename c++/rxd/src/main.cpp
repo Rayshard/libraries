@@ -114,14 +114,14 @@ struct Sphere : public RayIntersectable
 
 struct Camera
 {
-    Vec3F64 position, up, right, forward;
+    Vec3F64 position;
     Quaternion rotation;
+    Vec3F64 up, right, forward;
     double fov, zNear, zFar;
 
-    Camera(Vec3F64 _pos = Vec3F64::Zero(), Vec3F64 _up = Vec3F64({ 0.0, 1.0, 0.0 }), Vec3F64 _right = Vec3F64({ 1.0, 0.0, 0.0 }), double _fov = M_PI_2, double _zNear = 1.0, double _zFar = 100.0) :
+    Camera(Vec3F64 _pos = Vec3F64::Zero(), Quaternion _rot = Quaternion(), double _fov = M_PI_2, double _zNear = 1.0, double _zFar = 100.0) :
         position(_pos),
-        up(_up), right(_right),
-        forward(Vec3F64({ 0.0, 0.0, 1.0 })),
+        rotation(_rot),
         fov(_fov),
         zNear(_zNear),
         zFar(_zFar)
@@ -131,9 +131,14 @@ struct Camera
 
     void Capture(rxd::Bitmap& target, const std::vector<RayIntersectable*>& _scene) const
     {
-        int64_t targetWidth = (int64_t)target.GetWidth(), targetHeight = (int64_t)target.GetHeight();
+        //Vec3F64 up = Quaternion::Up(rotation), right = Quaternion::Right(rotation), forward = Quaternion::Forward(rotation);
+        Vec3F64 up = Rotate(Vec3F64({ 0.0, 1.0, 0.0 }), rotation);
+        Vec3F64 right = Rotate(Vec3F64({ 1.0, 0.0, 0.0 }), rotation);
+        Vec3F64 forward = Rotate(Vec3F64({ 0.0, 0.0, 1.0 }), rotation);
+
+        int64_t targetWidth = int64_t(target.GetWidth()), targetHeight = int64_t(target.GetHeight());
         int64_t targetWidthM1 = targetWidth - 1, targetHeightM1 = targetHeight - 1;
-        
+
         double aspectRatio = targetWidth / double(targetHeight);
         double portHalfWidth = zNear * std::tan(fov / 2.0);
         double portHalfHeight = portHalfWidth / aspectRatio;
@@ -150,6 +155,9 @@ struct Camera
 
                 Color color;
                 Vec3F64 portPoint = Normalize(forward + portPointXDir + portPointYDir);
+                // double near = std::sqrt(zNear*zNear + LengthSquared(portPointXDir + portPointYDir));
+                // double far = std::sqrt(zFar*zFar + LengthSquared(portPointXDir + portPointYDir) * (zFar / zNear));
+                // Ray ray = Ray(position + portPoint * near, position + portPoint * far);
                 Ray ray = Ray(position + portPoint * zNear, position + portPoint * zFar);
                 auto intersection = CastRay(ray, _scene, true);
 
@@ -170,9 +178,10 @@ class Application : public rxd::Runnable
 
     rxd::Bitmap target;
 
-    size_t UPS = 20, FPS = 20;
+    size_t UPS = 20, FPS = 2000;
 
     Camera camera;
+    bool lockedMouse = true;
 
 public:
     Application() :
@@ -180,7 +189,7 @@ public:
         keyboard(),
         target()
     {
-
+        
     }
 
     ~Application()
@@ -206,6 +215,7 @@ protected:
     {
         std::cout << "Application Started" << std::endl;
         window.Show();
+        rxd::SetConstrainedMouse(true);
     }
 
     void OnRun() override
@@ -258,25 +268,61 @@ protected:
     void OnQuit() override
     {
         std::cout << "Application Quitted" << std::endl;
+        rxd::SetConstrainedMouse(false);
     }
 
 private:
     void Update(double _dt)
     {
-        double cameraSpeed = 2.0;
+        keyboard.Update();
+        mouse.Update();
+
+        if (keyboard.IsKeyDown(Key::SDLK_ESCAPE))
+        {
+            Quit();
+            return;
+        }
+
+        if (mouse.WasButtonPressed(MouseButton::MIDDLE))
+            rxd::SetConstrainedMouse(lockedMouse = !lockedMouse);
+
+        static Vec2UI32 lastMosPos;
+        static double yaw, pitch;
+
+        double cameraSpeed = 2.0, cameraSensitivity = 0.01;
+
+        if (mouse.GetPosition() != lastMosPos)
+        {
+            if (lockedMouse)
+            {
+                yaw += mouse.GetDY() * cameraSensitivity;
+                pitch += mouse.GetDX() * cameraSensitivity;
+            }
+
+            lastMosPos = mouse.GetPosition();
+        }
+
+        camera.rotation = Quaternion::FromEulerAngles(0.0, pitch, yaw);
+
+        Vec3F64 right = Rotate(Vec3F64({ 1.0, 0.0, 0.0 }), camera.rotation);
+        Vec3F64 forward = Rotate(Vec3F64({ 0.0, 0.0, 1.0 }), camera.rotation);
+        Vec3F64 offset;
 
         if (keyboard.IsKeyDown(Key::SDLK_a))
-            camera.position[0] -= _dt * cameraSpeed;
+            offset -= right;
         if (keyboard.IsKeyDown(Key::SDLK_w))
-            camera.position[2] += _dt * cameraSpeed;
+            offset += forward;
         if (keyboard.IsKeyDown(Key::SDLK_s))
-            camera.position[2] -= _dt * cameraSpeed;
+            offset -= forward;
         if (keyboard.IsKeyDown(Key::SDLK_d))
-            camera.position[0] += _dt * cameraSpeed;
+            offset += right;
         if (keyboard.IsKeyDown(Key::SDLK_SPACE))
-            camera.position[1] += _dt * cameraSpeed;
+            offset[1]++;
         if (keyboard.IsKeyDown(Key::SDLK_LSHIFT) || keyboard.IsKeyDown(Key::SDLK_RSHIFT))
-            camera.position[1] -= _dt * cameraSpeed;
+            offset[1]--;
+
+        if (offset != Vec3F64::Zero())
+            camera.position += Normalize(offset) * _dt * cameraSpeed;
     }
 
     void Render()

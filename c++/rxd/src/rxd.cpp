@@ -46,6 +46,8 @@ namespace rxd
         initialized = false;
     }
 
+    void SetConstrainedMouse(bool _constrained) { CHECK_SDL(SDL_SetRelativeMouseMode(_constrained ? SDL_TRUE : SDL_FALSE) >= 0, "Unable to set mouse constraint!"); }
+
 #pragma region Runnable
     Runnable::Runnable() : running(false) { }
 

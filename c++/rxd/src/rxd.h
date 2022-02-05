@@ -40,6 +40,8 @@ namespace rxd
     void Quit();
     void CleanUp();
 
+    void SetConstrainedMouse(bool _constrained);
+
     namespace utilities
     {
         struct Color
@@ -61,6 +63,7 @@ namespace rxd
             inline static Color Clear() { return { 0, 0, 0, 0 }; }
         };
     }
+    
     class Bitmap
     {
     protected:
