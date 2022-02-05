@@ -13,6 +13,7 @@ namespace rxd
         CHECK_SDL(SDL_Init(SDL_INIT_EVERYTHING) >= 0, "SDL was not initialized properly!");
 
         IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG | IMG_INIT_TIF | IMG_INIT_WEBP);
+        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
 
         pixelFormat = SDL_AllocFormat(SDL_PIXELFORMAT_ARGB8888);
         initialized = true;
@@ -28,7 +29,12 @@ namespace rxd
         while (_runnable.IsRunning())
         {
             if (SDL_PollEvent(&event))
+            {
                 _runnable.OnEvent(event);
+
+                if (event.type == SDL_EventType::SDL_QUIT)
+                    _runnable.Quit();
+            }
         }
 
         thread.join();

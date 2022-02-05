@@ -9,6 +9,11 @@
 
 namespace rxd
 {
+    namespace window
+    {
+        class Window;
+    }
+
     extern SDL_PixelFormat* pixelFormat;
 
     class Runnable
