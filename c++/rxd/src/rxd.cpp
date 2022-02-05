@@ -157,8 +157,9 @@ namespace rxd
         ((Uint32*)surface->pixels)[_x + _y * surface->w] = SDL_MapRGBA(surface->format, _color.r, _color.g, _color.b, _color.a);
     }
 
-    uint64_t Bitmap::GetWidth() { return surface->w; }
-    uint64_t Bitmap::GetHeight() { return surface->h; }
+    uint64_t Bitmap::GetWidth() const { return surface->w; }
+    uint64_t Bitmap::GetHeight() const { return surface->h; }
+    double Bitmap::GetAspectRatio() const { return GetWidth() / (double)GetHeight(); }
 
     SDL_Surface* Bitmap::Internal::GetSurface(const Bitmap& _bitmap) { return _bitmap.surface; }
 #pragma endregion
@@ -242,5 +243,15 @@ namespace rxd
         screen = SDL_CreateTexture(renderer, pixelFormat->format, SDL_TEXTUREACCESS_STREAMING, screenResolution * GetAspectRatio(), screenResolution);
         CHECK_SDL(screen, "Could not create window screen!");
     }
+
+    Vec2UI32 Window::MapToAbsScreenCoords(uint32_t _x, uint32_t _y) const
+    {
+        return Vec2UI32({
+            (uint32_t)(_x / (GetWidth() - 1.0) * GetScreenWidth()),
+            (uint32_t)(_y / (GetHeight() - 1.0) * GetScreenHeight())
+            });
+    }
+
+    Vec2F64 Window::MapToNormCoords(uint32_t _x, uint32_t _y) const { return Vec2F64({ _x / (GetWidth() - 1.0), _y / (GetHeight() - 1.0) }); }
 #pragma endregion
 }

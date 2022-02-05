@@ -61,19 +61,7 @@ namespace rxd
             inline static Color Clear() { return { 0, 0, 0, 0 }; }
         };
     }
-
-    struct Image
-    {
-        virtual ~Image() { }
-
-        virtual utilities::Color GetPixel(int64_t _x, int64_t _y) = 0;
-        virtual void SetPixel(int64_t _x, int64_t _y, utilities::Color _col) = 0;
-
-        virtual uint64_t GetWidth() = 0;
-        virtual uint64_t GetHeight() = 0;
-    };
-
-    class Bitmap : public Image
+    class Bitmap
     {
     protected:
         SDL_Surface* surface;
@@ -93,14 +81,15 @@ namespace rxd
         void Fill(utilities::Color _color);
         void Blit(const Bitmap& _bitmap);
 
-        utilities::Color GetPixel(int64_t _x, int64_t _y) override;
-        void SetPixel(int64_t _x, int64_t _y, utilities::Color _col) override;
+        utilities::Color GetPixel(int64_t _x, int64_t _y);
+        void SetPixel(int64_t _x, int64_t _y, utilities::Color _col);
 
         Bitmap& operator=(const Bitmap& _b);
         Bitmap& operator=(Bitmap&& _b) noexcept;
 
-        uint64_t GetWidth() override;
-        uint64_t GetHeight() override;
+        uint64_t GetWidth() const;
+        uint64_t GetHeight() const;
+        double GetAspectRatio() const;
 
         class Internal
         {
@@ -132,6 +121,9 @@ namespace rxd
         uint64_t GetScreenWidth() const;
         uint64_t GetScreenHeight() const;
         double GetAspectRatio() const;
+
+        Vec2UI32 MapToAbsScreenCoords(uint32_t _x, uint32_t _y) const;
+        Vec2F64 MapToNormCoords(uint32_t _x, uint32_t _y) const;
 
     private:
         void UpdateScreen();
