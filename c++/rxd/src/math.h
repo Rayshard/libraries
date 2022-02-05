@@ -225,6 +225,17 @@ namespace rxd::math
         return result;
     }
 
+    template<typename T>
+    Vector<3, T> Cross(const Vector<3, T>& _a, const Vector<3, T>& _b)
+    {
+        return Vector<3, T>({
+                _a[1] * _b[2] - _a[2] * _b[1],
+                _a[2] * _b[0] - _a[0] * _b[2],
+                _a[0] * _b[1] - _a[1] * _b[0]
+            });
+    }
+
+
     template<size_t D, typename T>
     Vector<D, T> Normalize(const Vector<D, T>& _v) { return _v / Length(_v); }
 

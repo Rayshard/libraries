@@ -25,8 +25,10 @@ struct Ray
 struct RayIntersectable
 {
     virtual ~RayIntersectable() { }
+
+    virtual Color GetColor(const Vec3F64& _point) = 0;
+    virtual Vec3F64 GetNormal(const Vec3F64& _point) = 0;
     virtual std::optional<double> GetIntersection(const Ray& _ray) = 0;
-    virtual Color OnIntersect(const Vec3F64& _point, const std::vector<RayIntersectable*>& _intersectables) = 0;
 };
 
 
@@ -75,8 +77,8 @@ struct Sphere : public RayIntersectable
     double radius;
     Color color;
 
-    Sphere() : center(), radius(1), color(Color::White()) {}
     Sphere(const Vec3F64& _center, double _radius, const Color& _color) : center(_center), radius(_radius), color(_color) { }
+    Sphere() : center(), radius(1), color(Color::White()) {}
 
     std::optional<double> GetIntersection(const Ray& _ray) override
     {
@@ -93,22 +95,80 @@ struct Sphere : public RayIntersectable
         return std::min((-b + sqrtDiscriminant) / aTimes2, (-b - sqrtDiscriminant) / aTimes2);
     }
 
-    Color OnIntersect(const Vec3F64& _point, const std::vector<RayIntersectable*>& _intersectables) override
+    Color GetColor(const Vec3F64& _point) override { return color; }
+    Vec3F64 GetNormal(const Vec3F64& _point) override { return Normalize(_point - center); }
+};
+
+struct Plane : public RayIntersectable
+{
+    Vec3F64 normal;
+    double distance;
+    Color color;
+
+    Plane(const Vec3F64& _normal, double _distance, const Color& _color) : normal(_normal), distance(_distance), color(_color) { }
+    Plane() : normal(), distance(), color(Color::White()) {}
+
+    std::optional<double> GetIntersection(const Ray& _ray) override
     {
-        Vec3F64 lightPos = Vec3F64({ 0.0, 10.0, 0.0 });
-        Ray pointToLight = Ray(Ray(_point, lightPos).GetPoint(0.001), lightPos);
-        double ambience = 0.1, diffuse;
+        double normalDotRay = Dot(normal, _ray.b - _ray.a);
 
-        auto intersection = CastRay(pointToLight, _intersectables, false);
+        if (normalDotRay >= 0) { return std::nullopt; } //Plane and ray are parallel or facing the same way
+        else { return (distance - Dot(normal, _ray.a)) / normalDotRay; }
+    }
 
-        if (!intersection.has_value())
-        {
-            Vec3F64 normal = Normalize(_point - center), lightToPoint = Normalize(lightPos - _point);
-            diffuse = std::min(1.0, std::max(0.0, Dot(normal, lightToPoint)) + ambience);
-        }
-        else { diffuse = ambience; }
+    Color GetColor(const Vec3F64& _point) override { return color; }
+    Vec3F64 GetNormal(const Vec3F64& _point) override { return normal; }
+    
+    Vec3F64 GetOrigin() { return normal * distance; }
+};
 
-        return Vec4F64({ 1.0, color.r / 255.0 * diffuse, color.g / 255.0 * diffuse, color.b / 255.0 * diffuse });
+struct Triangle : public RayIntersectable
+{
+    Vec3F64 p1, p2, p3;
+
+    Triangle(const Vec3F64& _p1, const Vec3F64& _p2, const Vec3F64& _p3) : p1(_p1), p2(_p2), p3(_p3) { }
+    Triangle() : p1(), p2(), p3() {}
+
+    std::optional<double> GetIntersection(const Ray& _ray) override
+    {
+        // Check intersect supporting plane
+        Vec3F64 normal = Normalize(Cross(p2 - p1, p3 - p1));
+        Plane plane = Plane(normal, Dot(normal, p1), Color::Red());
+
+        auto planeInteresctionT = plane.GetIntersection(_ray);
+        if (!planeInteresctionT.has_value())
+            return std::nullopt;
+
+        // Check intersection is in triangle bounds
+        Vec3F64 point = _ray.GetPoint(planeInteresctionT.value());
+        double alpha = Dot(Cross(p2 - p1, point - p1), normal);
+        double beta = Dot(Cross(p3 - p2, point - p2), normal);
+        double gamma = Dot(Cross(p1 - p3, point - p3), normal);
+
+        if (alpha < 0.0 || beta < 0.0 || gamma < 0.0) { return std::nullopt; }
+        else { return planeInteresctionT.value(); }
+    }
+
+    Color GetColor(const Vec3F64& _point) override { return GetInterpolation(_point, Color::Red().ToVec4F64(), Color::Green().ToVec4F64(), Color::Blue().ToVec4F64()); }
+    Vec3F64 GetNormal(const Vec3F64& _point) override { return Normalize(Cross(p2 - p1, p3 - p1)); }
+
+    std::tuple<double, double, double> GetBarycentricCoords(const Vec3F64& _point)
+    {
+        Vec3F64 normal = Normalize(Cross(p2 - p1, p3 - p1));
+        double denominator = Dot(Cross(p2 - p1, p3 - p1), normal);
+
+        return {
+            Dot(Cross(p3 - p2, _point - p2), normal) / denominator,
+            Dot(Cross(p1 - p3, _point - p3), normal) / denominator,
+            Dot(Cross(p2 - p1, _point - p1), normal) / denominator
+        };
+    }
+
+    template<typename T>
+    T GetInterpolation(const Vec3F64& _point, const T& _p1V, const T& _p2V, const T& _p3V)
+    {
+        auto [a, b, c] = GetBarycentricCoords(_point);
+        return a * _p1V + b * _p2V + c * _p3V;
     }
 };
 
@@ -161,7 +221,27 @@ struct Camera
                 Ray ray = Ray(position + portPoint * zNear, position + portPoint * zFar);
                 auto intersection = CastRay(ray, _scene, true);
 
-                if (intersection.has_value()) { color = intersection.value().intersectable->OnIntersect(intersection.value().point, _scene); }
+                if (intersection.has_value())
+                {
+                    Vec3F64 point = intersection.value().point;
+                    RayIntersectable* intersectable = intersection.value().intersectable;
+                    Color intersectableColor = intersectable->GetColor(point);
+
+                    Vec3F64 lightPos = Vec3F64({ 0.0, 10.0, 0.0 });
+                    Ray pointToLight = Ray(Ray(point, lightPos).GetPoint(0.001), lightPos);
+                    double ambience = 0.1, diffuse = 0.1;
+
+                    auto lightRayIntersection = CastRay(pointToLight, _scene, false);
+
+                    if (!lightRayIntersection.has_value())
+                    {
+                        Vec3F64 normal = intersectable->GetNormal(point), lightToPoint = Normalize(lightPos - point);
+                        diffuse = std::min(1.0, std::max(0.0, Dot(normal, lightToPoint)) + ambience);
+                    }
+                    else { diffuse = ambience; }
+
+                    color = Vec4F64({ 1.0, intersectableColor.r / 255.0 * diffuse, intersectableColor.g / 255.0 * diffuse, intersectableColor.b / 255.0 * diffuse });
+                }
                 else { color = Lerp(Vec4F64({ 1.0, 1.0, 1.0, 1.0 }), Vec4F64({ 1.0, 0.5, 0.7, 1.0 }), (ray.GetDirection()[1] + 1.0) * 0.5); }
 
                 target.SetPixel(xPix, yPix, color);
@@ -178,7 +258,7 @@ class Application : public rxd::Runnable
 
     rxd::Bitmap target;
 
-    size_t UPS = 20, FPS = 2000;
+    size_t UPS = 20, FPS = 30;
 
     Camera camera;
     bool lockedMouse = true;
@@ -189,7 +269,7 @@ public:
         keyboard(),
         target()
     {
-        
+
     }
 
     ~Application()
@@ -215,7 +295,8 @@ protected:
     {
         std::cout << "Application Started" << std::endl;
         window.Show();
-        rxd::SetConstrainedMouse(true);
+
+        rxd::SetConstrainedMouse(lockedMouse = true);
     }
 
     void OnRun() override
@@ -330,8 +411,9 @@ private:
         using namespace rxd::utilities;
 
         Sphere sphere = Sphere(Vec3F64({ 0.0, 0.0, 5.0 }), 1.0, Color::Red());
-        Sphere floor = Sphere(Vec3F64({ 0.0, -1000.0, 0.0 }), 999.0, Color::Green());
-        std::vector<RayIntersectable*> scene = { &sphere, &floor };
+        Plane floor = Plane(Vec3F64({ 0.0, 1.0, 0.0 }), -2.0, Color::Green());
+        Triangle triangle = Triangle(Vec3F64({ -3.0, 1.0, 5.0 }), Vec3F64({ -2.0, 1.0, 5.0 }), Vec3F64({ -2.5, 0.0, 5.0 }));
+        std::vector<RayIntersectable*> scene = { &sphere, &floor, &triangle };
 
         if (target.GetWidth() != window.GetScreenWidth() || target.GetHeight() != window.GetScreenHeight())
             target = rxd::Bitmap(window.GetScreenWidth(), window.GetScreenHeight());
