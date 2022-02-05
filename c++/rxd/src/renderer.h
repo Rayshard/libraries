@@ -1,11 +1,19 @@
 #pragma once
 #include "rxd.h"
+#include "graphics.h"
 
 namespace rxd::renderer
 {
+    struct Renderable : public raytracing::Intersectable
+    {
+        virtual ~Renderable() { }
+
+        virtual Color GetColor(const Vec3F64& _point) = 0;
+    };
+
     struct IVertex
     {
-        virtual ~IVertex() { };
+        virtual ~IVertex() { }
 
         virtual const double& operator[](size_t _i) const = 0;
         virtual double& operator[](size_t _i) = 0;
@@ -32,7 +40,7 @@ namespace rxd::renderer
     using VertexShader = std::function<Output(const Input&)>;
 
     template<VertexType Input>
-    using PixelShader = std::function<utilities::Color(const Input&)>;
+    using PixelShader = std::function<Color(const Input&)>;
 
     template<typename T, size_t Offset, size_t Max>
     concept InRange = Offset * 8 <= Max * 8 - sizeof(T);

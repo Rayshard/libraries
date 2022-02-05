@@ -1,77 +1,20 @@
 #include <iostream>
 #include "rxd.h"
+#include "window.h"
 #include "renderer.h"
 #include "input.h"
 #include <chrono>
 #include <cassert>
 #include <optional>
 
+using namespace rxd::window;
 using namespace rxd::renderer;
-using namespace rxd::utilities;
 using namespace rxd::math;
+using namespace rxd::math::raytracing;
 using namespace rxd::input;
+using namespace rxd::graphics;
 
-struct Ray
-{
-    Vec3F64 a, b;
-
-    Ray() : a(), b() { }
-    Ray(const Vec3F64& _a, const Vec3F64& _b) : a(_a), b(_b) { }
-
-    Vec3F64 GetPoint(double _t) const { return (1 - _t) * a + _t * b; }
-    Vec3F64 GetDirection() const { return Normalize(b - a); }
-};
-
-struct RayIntersectable
-{
-    virtual ~RayIntersectable() { }
-
-    virtual Color GetColor(const Vec3F64& _point) = 0;
-    virtual Vec3F64 GetNormal(const Vec3F64& _point) = 0;
-    virtual std::optional<double> GetIntersection(const Ray& _ray) = 0;
-};
-
-
-struct RayIntersection
-{
-    RayIntersectable* intersectable;
-    Vec3F64 point;
-};
-
-std::optional<RayIntersection> CastRay(const Ray& _ray, const std::vector<RayIntersectable*>& _intersectables, bool _findClosest)
-{
-    if (_findClosest)
-    {
-        RayIntersectable* closest = nullptr;
-        double t = 1.0;
-
-        for (auto intersectable : _intersectables)
-        {
-            auto intersection = intersectable->GetIntersection(_ray);
-            if (intersection.has_value() && intersection.value() >= 0.0 && intersection.value() <= t)
-            {
-                closest = intersectable;
-                t = intersection.value();
-            }
-        }
-
-        if (closest) { return RayIntersection{ closest, _ray.GetPoint(t) }; }
-        else { return std::nullopt; }
-    }
-    else
-    {
-        for (auto intersectable : _intersectables)
-        {
-            auto intersection = intersectable->GetIntersection(_ray);
-            if (intersection.has_value() && intersection.value() >= 0.0 && intersection.value() <= 1.0)
-                return RayIntersection{ intersectable, _ray.GetPoint(intersection.value()) };
-        }
-
-        return std::nullopt;
-    }
-}
-
-struct Sphere : public RayIntersectable
+struct Sphere : public Renderable
 {
     Vec3F64 center;
     double radius;
@@ -99,7 +42,7 @@ struct Sphere : public RayIntersectable
     Vec3F64 GetNormal(const Vec3F64& _point) override { return Normalize(_point - center); }
 };
 
-struct Plane : public RayIntersectable
+struct Plane : public Renderable
 {
     Vec3F64 normal;
     double distance;
@@ -118,11 +61,11 @@ struct Plane : public RayIntersectable
 
     Color GetColor(const Vec3F64& _point) override { return color; }
     Vec3F64 GetNormal(const Vec3F64& _point) override { return normal; }
-    
+
     Vec3F64 GetOrigin() { return normal * distance; }
 };
 
-struct Triangle : public RayIntersectable
+struct Triangle : public Renderable
 {
     Vec3F64 p1, p2, p3;
 
@@ -189,9 +132,14 @@ struct Camera
 
     }
 
-    void Capture(rxd::Bitmap& target, const std::vector<RayIntersectable*>& _scene) const
+    void Capture(Bitmap& target, const std::vector<Renderable*>& _scene) const
     {
-        //Vec3F64 up = Quaternion::Up(rotation), right = Quaternion::Right(rotation), forward = Quaternion::Forward(rotation);
+        std::vector<Intersectable*> intersectables;
+        intersectables.reserve(_scene.size());
+
+        for (auto& renderable : _scene)
+            intersectables.push_back(renderable);
+
         Vec3F64 up = Rotate(Vec3F64({ 0.0, 1.0, 0.0 }), rotation);
         Vec3F64 right = Rotate(Vec3F64({ 1.0, 0.0, 0.0 }), rotation);
         Vec3F64 forward = Rotate(Vec3F64({ 0.0, 0.0, 1.0 }), rotation);
@@ -219,19 +167,19 @@ struct Camera
                 // double far = std::sqrt(zFar*zFar + LengthSquared(portPointXDir + portPointYDir) * (zFar / zNear));
                 // Ray ray = Ray(position + portPoint * near, position + portPoint * far);
                 Ray ray = Ray(position + portPoint * zNear, position + portPoint * zFar);
-                auto intersection = CastRay(ray, _scene, true);
+                auto intersection = TryIntersect(ray, intersectables, true);
 
                 if (intersection.has_value())
                 {
                     Vec3F64 point = intersection.value().point;
-                    RayIntersectable* intersectable = intersection.value().intersectable;
+                    Renderable* intersectable = (Renderable*)intersection.value().intersectable;
                     Color intersectableColor = intersectable->GetColor(point);
 
                     Vec3F64 lightPos = Vec3F64({ 0.0, 10.0, 0.0 });
                     Ray pointToLight = Ray(Ray(point, lightPos).GetPoint(0.001), lightPos);
                     double ambience = 0.1, diffuse = 0.1;
 
-                    auto lightRayIntersection = CastRay(pointToLight, _scene, false);
+                    auto lightRayIntersection = TryIntersect(pointToLight, intersectables, false);
 
                     if (!lightRayIntersection.has_value())
                     {
@@ -252,11 +200,11 @@ struct Camera
 
 class Application : public rxd::Runnable
 {
-    rxd::Window window;
+    Window window;
     Keyboard keyboard;
     Mouse mouse;
 
-    rxd::Bitmap target;
+    Bitmap target;
 
     size_t UPS = 20, FPS = 30;
 
@@ -408,15 +356,13 @@ private:
 
     void Render()
     {
-        using namespace rxd::utilities;
-
         Sphere sphere = Sphere(Vec3F64({ 0.0, 0.0, 5.0 }), 1.0, Color::Red());
         Plane floor = Plane(Vec3F64({ 0.0, 1.0, 0.0 }), -2.0, Color::Green());
         Triangle triangle = Triangle(Vec3F64({ -3.0, 1.0, 5.0 }), Vec3F64({ -2.0, 1.0, 5.0 }), Vec3F64({ -2.5, 0.0, 5.0 }));
-        std::vector<RayIntersectable*> scene = { &sphere, &floor, &triangle };
+        std::vector<Renderable*> scene = { &sphere, &floor, &triangle };
 
         if (target.GetWidth() != window.GetScreenWidth() || target.GetHeight() != window.GetScreenHeight())
-            target = rxd::Bitmap(window.GetScreenWidth(), window.GetScreenHeight());
+            target = Bitmap(window.GetScreenWidth(), window.GetScreenHeight());
 
         camera.Capture(target, scene);
         window.FlipScreenBuffer(target);

@@ -2,6 +2,8 @@
 #include <array>
 #include <cmath>
 #include <string>
+#include <optional>
+#include <vector>
 #include <cassert> // TODO: remove
 #include <iostream> // TODO: remove
 
@@ -385,5 +387,35 @@ namespace rxd::math
     {
         Quaternion r = _q * Quaternion(_v[0], _v[1], _v[2], 0.0) * Conjugate(_q);
         return Vec3F64({ r.x, r.y, r.z });
+    }
+
+    namespace raytracing
+    {
+        struct Ray
+        {
+            Vec3F64 a, b;
+
+            Ray() : a(), b() { }
+            Ray(const Vec3F64& _a, const Vec3F64& _b) : a(_a), b(_b) { }
+
+            Vec3F64 GetPoint(double _t) const { return (1 - _t) * a + _t * b; }
+            Vec3F64 GetDirection() const { return Normalize(b - a); }
+        };
+
+        struct Intersectable
+        {
+            virtual ~Intersectable() { }
+
+            virtual Vec3F64 GetNormal(const Vec3F64& _point) = 0;
+            virtual std::optional<double> GetIntersection(const Ray& _ray) = 0;
+        };
+
+        struct Intersection
+        {
+            Intersectable* intersectable;
+            Vec3F64 point;
+        };
+
+        std::optional<Intersection> TryIntersect(const Ray& _ray, const std::vector<Intersectable*>& _intersectables, bool _chooseClosest);
     }
 }
